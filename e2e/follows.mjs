@@ -130,7 +130,9 @@ try {
   assert.deepEqual(await graph.following(alice.address), []);
   console.log("PASS");
 } finally {
-  try {
-    lattice("down");
-  } catch {}
+  for (const step of [["mine", "stop"], ["down"]]) {
+    try {
+      lattice(...step);
+    } catch {}
+  }
 }
