@@ -1,0 +1,17 @@
+{
+  "name": "follows",
+  "version": "0.1.0",
+  "description": "The follow graph Lattice apps share",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./browser": "./src/browser.mjs"
+  },
+  "files": [
+    "src",
+    "vendor"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}
