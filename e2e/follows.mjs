@@ -3,7 +3,7 @@
 // premine to Alice. Alice funds Bob and Carol. Alice and Carol follow Bob,
 // and the library reads both ends of the graph from the node. Every way of
 // writing someone else's follow, or a record that is not a follow, is
-// refused. Last, Alice unfollows Bob.
+// refused, and so is half of a follow. Last, Alice unfollows Bob.
 //
 //   (cd policy && cargo build --release --target wasm32-unknown-unknown)
 //   LATTICE=<lattice-node>/.build/debug/lattice node e2e/follows.mjs
@@ -122,6 +122,8 @@ try {
   await refused("Bob writes Alice's follow of Carol", bob, await records.follow(state, alice.address, carol.address));
   await refused("Bob deletes Alice's follow of him", bob, await records.unfollow(state, alice.address, bob.address));
   await refused("Bob follows a non-address", bob, { actions: [{ key: `user/${bob.address}/follows/alice`, newValue: "1" }] });
+  await refused("Bob writes his follow of Alice without its twin", bob, { actions: [{ key: records.followKey(bob.address, alice.address), newValue: "1" }] });
+  await refused("Bob lists himself as Carol's follower without following her", bob, { actions: [{ key: records.followerKey(bob.address, carol.address), newValue: "1" }] });
   await refused("Bob writes a profile here", bob, { actions: [{ key: `user/${bob.address}/profile`, newValue: "{}" }] });
 
   await admitted("Alice unfollows Bob", alice, await records.unfollow(state, alice.address, bob.address));

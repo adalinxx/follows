@@ -8,17 +8,18 @@ Follows is its own Lattice chain. It holds follows and nothing else.
 
 ## Records
 
-| Key | Present while | Who may write |
-| --- | --- | --- |
-| `user/<a>/follows/<b>` | `<a>` follows `<b>` | `<a>` |
+A follow of `<b>` by `<a>` is two keys, so that each end of the graph is one
+prefix read:
 
-`<a>` and `<b>` are account addresses. A follow is one record, written or
-deleted only by the follower, and clients write `"1"` as its value. The chain
-gives values no meaning.
+| Key | Lists |
+| --- | --- |
+| `user/<a>/follows/<b>` | whom `<a>` follows: read `user/<a>/follows/` |
+| `followers/<b>/<a>` | who follows `<b>`: read `followers/<b>/` |
 
-- **Whom `<a>` follows**: the keys under `user/<a>/follows/`, one prefix read.
-- **Who follows `<b>`**: every key ending in `/follows/<b>`. Since the chain
-  holds only follows, that read is the whole graph, so it grows with the graph.
+`<a>` and `<b>` are account addresses. Only `<a>` writes or deletes them, and
+always both in one transaction, to the same value; clients write `"1"`. The
+chain starts with neither, so the two lists always agree: nobody shows up as a
+follower without following.
 
 Names and photos for these addresses come from
 [Moniker](https://github.com/adalinxx/moniker), the profile chain.
@@ -71,5 +72,6 @@ CONTEXT_DIR=.contexts node --test test/policy.test.mjs
 ```
 
 The e2e test launches the chain from `chain/spec.json` on a private node.
-Alice and Carol follow Bob, and the test reads both ends of the graph. Each
-way of writing someone else's follow is refused. Then Alice unfollows Bob.
+Alice and Carol follow Bob, and the test reads both ends of the graph. Writing
+someone else's follow, or half of a follow, is refused. Then Alice unfollows
+Bob.

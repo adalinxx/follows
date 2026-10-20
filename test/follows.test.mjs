@@ -33,7 +33,7 @@ function chain() {
     }
     return true;
   }
-  return { state, submit };
+  return { state, submit, map };
 }
 
 test("follows are read from both ends", async () => {
@@ -49,12 +49,14 @@ test("follows are read from both ends", async () => {
   assert.ok(!(await records.follows(state, BOB, ALICE)));
 });
 
-test("unfollow deletes the record; repeats write nothing", async () => {
-  const { state, submit } = chain();
+test("unfollow deletes both keys; repeats write nothing", async () => {
+  const { state, submit, map } = chain();
   assert.ok(submit(ALICE, await records.follow(state, ALICE, BOB)));
+  assert.deepEqual([...map.keys()].sort(), [`followers/${BOB}/${ALICE}`, `user/${ALICE}/follows/${BOB}`]);
   assert.deepEqual(await records.follow(state, ALICE, BOB), { actions: [] });
   assert.ok(submit(ALICE, await records.unfollow(state, ALICE, BOB)));
   assert.deepEqual(await records.following(state, ALICE), []);
+  assert.equal(map.size, 0);
   assert.deepEqual(await records.followers(state, BOB), []);
   assert.deepEqual(await records.unfollow(state, ALICE, BOB), { actions: [] });
 });

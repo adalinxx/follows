@@ -1,7 +1,7 @@
-// The follow graph's records. `<a>` follows `<b>` while `user/<a>/follows/<b>`
-// exists, and only `<a>` may write or delete it (the chain's policy). Whom an
-// account follows is one prefix read; who follows it is found by reading
-// every follow, which is the whole chain.
+// The follow graph's records. `<a>` follows `<b>` while two keys exist,
+// `user/<a>/follows/<b>` and its twin `followers/<b>/<a>`, so that both ends
+// are one prefix read. Only `<a>` may write them, and always together (the
+// chain's policy).
 
 /**
  * Whether `text` is an account address in its one canonical spelling, as the
@@ -20,6 +20,7 @@ export function isAddress(text) {
 }
 
 export const followKey = (follower, followed) => `user/${follower}/follows/${followed}`;
+export const followerKey = (follower, followed) => `followers/${followed}/${follower}`;
 
 /** Whether `follower` follows `followed`. */
 export const follows = async (state, follower, followed) => (await state.get(followKey(follower, followed))) !== undefined;
@@ -32,11 +33,11 @@ export async function following(state, address) {
   return found;
 }
 
-/** The addresses that follow `address`, in key order. Reads every follow. */
+/** The addresses that follow `address`, in key order. */
 export async function followers(state, address) {
-  const suffix = `/follows/${address}`;
+  const prefix = `followers/${address}/`;
   const found = [];
-  for await (const [key] of state.list("user/")) if (key.endsWith(suffix)) found.push(key.slice("user/".length, -suffix.length));
+  for await (const [key] of state.list(prefix)) found.push(key.slice(prefix.length));
   return found;
 }
 
@@ -44,12 +45,13 @@ export async function followers(state, address) {
 export async function follow(state, follower, followed) {
   if (!isAddress(followed)) throw new Error(`not an address: ${followed}`);
   if (await follows(state, follower, followed)) return { actions: [] };
-  return { actions: [{ key: followKey(follower, followed), newValue: "1" }] };
+  return { actions: [followKey, followerKey].map((key) => ({ key: key(follower, followed), newValue: "1" })) };
 }
 
 /** `follower` stops following `followed`; nothing to write when it does not. */
 export async function unfollow(state, follower, followed) {
-  const key = followKey(follower, followed);
-  const oldValue = await state.get(key);
-  return { actions: oldValue === undefined ? [] : [{ key, oldValue }] };
+  const keys = [followKey(follower, followed), followerKey(follower, followed)];
+  const oldValues = await Promise.all(keys.map((key) => state.get(key)));
+  if (oldValues[0] === undefined) return { actions: [] };
+  return { actions: keys.map((key, i) => ({ key, oldValue: oldValues[i] })) };
 }

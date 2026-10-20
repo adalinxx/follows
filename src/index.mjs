@@ -65,7 +65,7 @@ export function createFollows(options) {
 
     /** The addresses `address` follows. */
     following: async (address) => records.following(await state(), address),
-    /** The addresses that follow `address`. Reads every follow on the chain. */
+    /** The addresses that follow `address`. */
     followers: async (address) => records.followers(await state(), address),
     /** Whether `follower` follows `followed`. */
     follows: async (follower, followed) => records.follows(await state(), follower, followed),
