@@ -85,6 +85,19 @@ CONTEXT_DIR=.contexts node --test test/policy.test.mjs
   ../target/wasm32-unknown-unknown/release/follows_policy.wasm ../../.contexts)
 ```
 
+The page's acceptance tests run it in Chromium against a private node with a
+Follows chain and a Moniker chain (under Moniker's own policy, copied into
+`e2e/ui/moniker/`):
+
+```sh
+cd e2e/ui && npm install && LATTICE=<lattice-node>/.build/debug/lattice npm test
+```
+
+They cover search by handle and address, both tabs, counts, the filter,
+navigation and links, empty lists, accounts with no card, hostile names and
+photos, self-follows, handles that changed hands, unfollows, a long list, a
+slow page overtaken by a newer one, dead nodes, phone width and dark mode.
+
 The e2e test launches the chain from `chain/spec.json` on a private node.
 Alice and Carol follow Bob, and the test reads both ends of the graph. Writing
 someone else's follow, or half of a follow, is refused. Then Alice unfollows

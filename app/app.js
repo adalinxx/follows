@@ -5,13 +5,19 @@
 // Routes: #/                     the search
 //         #/<who>                their followers (<who> is @handle or address)
 //         #/<who>/following      whom they follow
+//
+// A link may carry `?node=` (nodes, comma-separated), `?chain=` (the Follows
+// chain) and `?moniker=` (the Moniker chain) to read somewhere else.
 import * as sdk from "../vendor/lattice-sdk.js";
 import { createFollows } from "../src/index.mjs";
 import { createMoniker } from "./vendor/moniker-sdk/src/index.mjs";
 import { count, label, matches, parseWho, shortAddress, whoPath } from "./lib.mjs";
 
-const graph = createFollows({ sdk });
-const moniker = createMoniker({ sdk, app: "https://app.moniker.bio/" });
+const params = new URLSearchParams(location.search);
+const nodes = params.get("node")?.split(",");
+const chainOf = (name) => params.get(name)?.split("/");
+const graph = createFollows({ sdk, ...(nodes && { nodes }), ...(chainOf("chain") && { chain: chainOf("chain") }) });
+const moniker = createMoniker({ sdk, app: "https://app.moniker.bio/", ...(nodes && { nodes }), ...(chainOf("moniker") && { chain: chainOf("moniker") }) });
 
 const main = document.querySelector("main");
 const search = document.querySelector("#search");
@@ -67,8 +73,9 @@ function message(text) {
 }
 
 function page(person, followers, following) {
-  const base = `#/${encodeURIComponent(whoPath(person))}`;
-  const { tab } = route();
+  // The tabs keep how the person was reached: their @handle or their address.
+  const { who, tab } = route();
+  const base = `#/${encodeURIComponent(who)}`;
   main.innerHTML = `
     <section class="person">
       ${avatar(person, 72)}
