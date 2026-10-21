@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Follows</title>
+<meta name="description" content="One follow list for every app. See who follows anyone, and whom they follow.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='8' cy='9' r='4' fill='%233346D3'/%3E%3Ccircle cx='17' cy='9' r='3' fill='%233346D3' opacity='.6'/%3E%3Cpath d='M1 21c0-4 3-7 7-7s7 3 7 7z' fill='%233346D3'/%3E%3Cpath d='M15 21c0-2.5-.8-4.6-2.2-6.1A5.5 5.5 0 0 1 23 18.5V21z' fill='%233346D3' opacity='.6'/%3E%3C/svg%3E">
+<style>
+@font-face { font-family: "Schibsted Grotesk"; font-weight: 400 900; font-display: swap; src: url(fonts/schibsted-grotesk-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Schibsted Grotesk"; font-weight: 400 900; font-display: swap; src: url(fonts/schibsted-grotesk-latin-ext.woff2) format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1E00-1E9F, U+20A0-20AB, U+20AD-20C4, U+2C60-2C7F, U+A720-A7FF; }
+:root {
+  --ink: #16181D; --muted: #5F6470; --line: #E6E7EB; --bg: #FFFFFF; --soft: #F4F5F7;
+  --accent: #3346D3; --accent-ink: #1F2DA0; --avatar: #E3E6F8; --avatar-ink: #3346D3;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ink: #ECEDF0; --muted: #A3A8B3; --line: #2C2F36; --bg: #121418; --soft: #1C1F24;
+    --accent: #8D9BFF; --accent-ink: #B4BEFF; --avatar: #262B45; --avatar-ink: #B4BEFF;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ink: #ECEDF0; --muted: #A3A8B3; --line: #2C2F36; --bg: #121418; --soft: #1C1F24;
+  --accent: #8D9BFF; --accent-ink: #B4BEFF; --avatar: #262B45; --avatar-ink: #B4BEFF;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 "Schibsted Grotesk", system-ui, -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
+a { color: var(--accent); }
+a:hover { color: var(--accent-ink); }
+button, input { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+h1 { margin: 0; letter-spacing: -0.01em; }
+p { margin: 0; }
+.muted { color: var(--muted); }
+.small { font-size: 14px; }
+.mono { font-variant-numeric: tabular-nums; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+[hidden] { display: none !important; }
+
+.wrap { max-width: 640px; margin: 0 auto; padding: 0 16px; }
+header { border-bottom: 1px solid var(--line); }
+header .wrap { display: flex; align-items: center; gap: 16px; padding-top: 12px; padding-bottom: 12px; }
+.brand { font-weight: 800; font-size: 19px; color: var(--ink); text-decoration: none; }
+#find { flex: 1; display: flex; gap: 8px; min-width: 0; }
+input[type="search"] { flex: 1; min-width: 0; height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); }
+input[type="search"]:focus { background: var(--bg); border-color: var(--accent); outline: none; }
+button { height: 40px; padding: 0 16px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 600; cursor: pointer; }
+:root[data-theme="dark"] button { color: #121418; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) button { color: #121418; } }
+
+main.wrap { padding-top: 32px; padding-bottom: 48px; }
+.home h1 { font-size: 32px; line-height: 1.15; margin-bottom: 12px; }
+.home p { max-width: 34em; }
+.status { padding: 24px 0; }
+.status button { margin-top: 12px; }
+
+.person { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+.person > div { min-width: 0; }
+.person h1 { font-size: 26px; overflow-wrap: anywhere; }
+.tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+.tabs a { padding: 8px 0 10px; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tabs a[aria-current="page"] { color: var(--ink); font-weight: 700; border-color: var(--ink); }
+.filter { display: flex; margin-bottom: 8px; }
+
+.people { list-style: none; margin: 0; padding: 0; }
+.people a { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); color: inherit; text-decoration: none; min-height: 56px; }
+.people a:hover strong { text-decoration: underline; }
+.who { display: flex; flex-direction: column; min-width: 0; }
+.who strong, .who .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.empty { padding: 16px 0; }
+
+.avatar { flex: none; width: var(--size); height: var(--size); border-radius: 50%; overflow: hidden; display: grid; place-items: center;
+  background: var(--avatar); color: var(--avatar-ink); font-weight: 700; font-size: calc(var(--size) * 0.42); }
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+@media (max-width: 480px) {
+  header .wrap { flex-wrap: wrap; gap: 8px; }
+  #find { flex-basis: 100%; }
+  .home h1 { font-size: 26px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <a class="brand" href="#/">Follows</a>
+    <form id="find" role="search">
+      <label class="sr" for="search">A @handle or an address</label>
+      <input id="search" type="search" placeholder="@handle or address" autocomplete="off" spellcheck="false">
+      <button type="submit">Search</button>
+    </form>
+  </div>
+</header>
+<main class="wrap"></main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

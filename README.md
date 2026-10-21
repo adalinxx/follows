@@ -24,6 +24,20 @@ follower without following.
 Names and photos for these addresses come from
 [Moniker](https://github.com/adalinxx/moniker), the profile chain.
 
+## The page
+
+`app/` is a static page: search a `@handle` (resolved through Moniker) or an
+address, and see who follows them and whom they follow, each list with a
+filter that matches name, `@handle` or address. Names and photos come from
+Moniker through [moniker-sdk](https://github.com/adalinxx/moniker-sdk), a
+submodule at `app/vendor/moniker-sdk` pinned to a release: clone with
+`--recurse-submodules`. Links: `#/@handle`, `#/<address>`, and
+`#/<who>/following`.
+
+```sh
+python3 -m http.server 8767   # from the repository root, then open http://127.0.0.1:8767/app/
+```
+
 ## Use Follows in your app
 
 ```js
