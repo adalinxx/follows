@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createFollows, DEFAULTS, isAddress } from "../src/index.mjs";
+import { createFollows, DEFAULTS, isAddress, isHandle } from "../src/index.mjs";
 
 // Enough of the Lattice SDK for createFollows to start; nothing here reads a node.
 const sdk = { VolumeClient: class {}, HTTPVolumeTransport: class {}, decodeDagCbor: () => undefined };
@@ -17,10 +17,13 @@ test("defaults to the testnet trial chain and its shared hosts", () => {
 });
 
 test("writes need a wallet", async () => {
-  await assert.rejects(createFollows({ sdk }).follow(address, { wallet: undefined }), /Lattice wallet/);
+  await assert.rejects(createFollows({ sdk }).follow("ada", { wallet: undefined }), /Lattice wallet/);
 });
 
-test("checks addresses", () => {
+test("checks addresses and handles", () => {
   assert.ok(isAddress(address));
   assert.ok(!isAddress("bafyrei"));
+  assert.ok(isHandle("ada_1"));
+  assert.ok(!isHandle("Ada"));
+  assert.ok(!isHandle("@ada"));
 });

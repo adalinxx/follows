@@ -38,38 +38,41 @@ function chain() {
 
 test("follows are read from both ends", async () => {
   const { state, submit } = chain();
-  assert.ok(submit(ALICE, await records.follow(state, ALICE, BOB)));
-  assert.ok(submit(ALICE, await records.follow(state, ALICE, CAROL)));
-  assert.ok(submit(CAROL, await records.follow(state, CAROL, BOB)));
-  assert.deepEqual(await records.following(state, ALICE), [BOB, CAROL].sort());
-  assert.deepEqual(await records.followers(state, BOB), [ALICE, CAROL].sort());
-  assert.deepEqual(await records.followers(state, CAROL), [ALICE]);
-  assert.deepEqual(await records.followers(state, ALICE), []);
-  assert.ok(await records.follows(state, ALICE, BOB));
-  assert.ok(!(await records.follows(state, BOB, ALICE)));
+  assert.ok(submit(ALICE, await records.follow(state, ALICE, "bob")));
+  assert.ok(submit(ALICE, await records.follow(state, ALICE, "@carol")));
+  assert.ok(submit(CAROL, await records.follow(state, CAROL, "bob")));
+  assert.deepEqual(await records.following(state, ALICE), ["bob", "carol"]);
+  assert.deepEqual(await records.followers(state, "bob"), [ALICE, CAROL].sort());
+  assert.deepEqual(await records.followers(state, "@carol"), [ALICE]);
+  assert.deepEqual(await records.followers(state, "alice"), []);
+  assert.ok(await records.follows(state, ALICE, "@bob"));
+  assert.ok(!(await records.follows(state, BOB, "alice")));
 });
 
 test("unfollow deletes both keys; repeats write nothing", async () => {
   const { state, submit, map } = chain();
-  assert.ok(submit(ALICE, await records.follow(state, ALICE, BOB)));
-  assert.deepEqual([...map.keys()].sort(), [`followers/${BOB}/${ALICE}`, `user/${ALICE}/follows/${BOB}`]);
-  assert.deepEqual(await records.follow(state, ALICE, BOB), { actions: [] });
-  assert.ok(submit(ALICE, await records.unfollow(state, ALICE, BOB)));
+  assert.ok(submit(ALICE, await records.follow(state, ALICE, "bob")));
+  assert.deepEqual([...map.keys()].sort(), [`followers/@bob/${ALICE}`, `user/${ALICE}/follows/@bob`]);
+  assert.deepEqual(await records.follow(state, ALICE, "@bob"), { actions: [] });
+  assert.ok(submit(ALICE, await records.unfollow(state, ALICE, "bob")));
   assert.deepEqual(await records.following(state, ALICE), []);
   assert.equal(map.size, 0);
-  assert.deepEqual(await records.followers(state, BOB), []);
-  assert.deepEqual(await records.unfollow(state, ALICE, BOB), { actions: [] });
+  assert.deepEqual(await records.followers(state, "bob"), []);
+  assert.deepEqual(await records.unfollow(state, ALICE, "bob"), { actions: [] });
 });
 
 test("a follow is the follower's alone", async () => {
   const { state, submit } = chain();
-  // Bob signs a write that would make Alice follow him.
-  assert.ok(!submit(BOB, await records.follow(state, ALICE, BOB)));
-  assert.ok(submit(ALICE, await records.follow(state, ALICE, BOB)));
-  assert.ok(!submit(BOB, await records.unfollow(state, ALICE, BOB)));
-  assert.deepEqual(await records.followers(state, BOB), [ALICE]);
+  // Bob signs a write that would make Alice follow his name.
+  assert.ok(!submit(BOB, await records.follow(state, ALICE, "bob")));
+  assert.ok(submit(ALICE, await records.follow(state, ALICE, "bob")));
+  assert.ok(!submit(BOB, await records.unfollow(state, ALICE, "bob")));
+  assert.deepEqual(await records.followers(state, "bob"), [ALICE]);
 });
 
-test("only an address is followed", async () => {
-  await assert.rejects(records.follow(chain().state, ALICE, "@bob"), /not an address/);
+test("only a handle is followed", async () => {
+  for (const notHandle of ["Bob", "@", "bob smith", BOB.toUpperCase(), ""]) {
+    await assert.rejects(records.follow(chain().state, ALICE, notHandle), /not a handle/, notHandle);
+  }
+  assert.throws(() => records.followKey(ALICE, "@@bob"), /not a handle/);
 });

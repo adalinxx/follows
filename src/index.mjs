@@ -1,10 +1,12 @@
 // Follows for any app: one follow graph every Lattice app shares, so a
 // person's audience comes with them instead of starting at zero in each app.
+// Accounts follow names (Moniker handles): following @ada means following
+// whoever holds @ada now, and @ada's followers go with the name.
 //
 //   const graph = createFollows({ sdk });               // sdk: the Lattice SDK module
-//   const people = await graph.following(address);     // whom they follow
-//   const audience = await graph.followers(address);   // who follows them
-//   await graph.follow(address, { wallet: window.lattice });
+//   const names = await graph.following(address);      // ["ada", …]: the names an account follows
+//   const audience = await graph.followers("ada");     // the accounts following @ada
+//   await graph.follow("ada", { wallet: window.lattice });
 //
 // Reads go to the first of `nodes` that answers and are checked by CID, so
 // they do not depend on trusting that node. Writes go to the wallet, which
@@ -63,24 +65,24 @@ export function createFollows(options) {
     nodes,
     state,
 
-    /** The addresses `address` follows. */
+    /** The handles account `address` follows, without their `@`. */
     following: async (address) => records.following(await state(), address),
-    /** The addresses that follow `address`. */
-    followers: async (address) => records.followers(await state(), address),
-    /** Whether `follower` follows `followed`. */
-    follows: async (follower, followed) => records.follows(await state(), follower, followed),
+    /** The accounts that follow `handle` (with or without its `@`). */
+    followers: async (handle) => records.followers(await state(), handle),
+    /** Whether account `follower` follows `handle`. */
+    follows: async (follower, handle) => records.follows(await state(), follower, handle),
 
-    /** The connected account follows `address`. Resolves to undefined when it already does. */
-    follow: async (address, { wallet }) => {
+    /** The connected account follows `handle`. Resolves to undefined when it already does. */
+    follow: async (handle, { wallet }) => {
       const follower = await me(wallet);
-      return send(wallet, await records.follow(await state({ fresh: true }), follower, address));
+      return send(wallet, await records.follow(await state({ fresh: true }), follower, handle));
     },
-    /** The connected account stops following `address`. Resolves to undefined when it did not. */
-    unfollow: async (address, { wallet }) => {
+    /** The connected account stops following `handle`. Resolves to undefined when it did not. */
+    unfollow: async (handle, { wallet }) => {
       const follower = await me(wallet);
-      return send(wallet, await records.unfollow(await state({ fresh: true }), follower, address));
+      return send(wallet, await records.unfollow(await state({ fresh: true }), follower, handle));
     },
   };
 }
 
-export const { isAddress } = records;
+export const { isAddress, isHandle } = records;

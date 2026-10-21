@@ -14,7 +14,7 @@ import * as sdk from "../vendor/lattice-sdk.js";
 import { context, validate } from "./host.mjs";
 
 const address = (seed) => sdk.addressFromPublicKey(sdk.publicKeyFromPrivate(new Uint8Array(32).fill(seed)));
-const [ALICE, BOB, CAROL] = [address(1), address(2), address(3)];
+const [ALICE, BOB] = [address(1), address(2)];
 const PATH = ["Nexus", "follows"];
 
 const contextDirectory = process.env.CONTEXT_DIR;
@@ -38,69 +38,75 @@ function accepts(actions, { signers = [ALICE], accountActions = [] } = {}) {
   return accepted;
 }
 
-const follow = (a, b) => `user/${a}/follows/${b}`;
-const follower = (a, b) => `followers/${b}/${a}`;
-/** A follow of `b` by `a` as both keys, each with `change` ({ oldValue?, newValue? }). */
-const both = (a, b, change) => [{ key: follow(a, b), ...change }, { key: follower(a, b), ...change }];
+const follow = (a, name) => `user/${a}/follows/${name}`;
+const follower = (a, name) => `followers/${name}/${a}`;
+/** A follow of `name` by account `a` as both keys, each with `change` ({ oldValue?, newValue? }). */
+const both = (a, name, change) => [{ key: follow(a, name), ...change }, { key: follower(a, name), ...change }];
 
-test("an account follows, refollows and unfollows, both keys at once", () => {
-  assert.ok(accepts(both(ALICE, BOB, { newValue: "1" })));
-  assert.ok(accepts(both(ALICE, BOB, { oldValue: "1", newValue: "1" })));
-  assert.ok(accepts(both(ALICE, BOB, { oldValue: "1" })));
-  assert.ok(accepts([...both(ALICE, BOB, { newValue: "1" }), ...both(ALICE, CAROL, { newValue: "1" })]));
+test("an account follows, refollows and unfollows a name, both keys at once", () => {
+  assert.ok(accepts(both(ALICE, "@bob", { newValue: "1" })));
+  assert.ok(accepts(both(ALICE, "@bob", { oldValue: "1", newValue: "1" })));
+  assert.ok(accepts(both(ALICE, "@bob", { oldValue: "1" })));
+  assert.ok(accepts([...both(ALICE, "@bob", { newValue: "1" }), ...both(ALICE, "@carol_2", { newValue: "1" })]));
   // The twin may come first, or after other follows.
-  assert.ok(accepts([{ key: follower(ALICE, BOB), newValue: "1" }, ...both(ALICE, CAROL, { newValue: "1" }), { key: follow(ALICE, BOB), newValue: "1" }]));
-  assert.ok(accepts(both(ALICE, ALICE, { newValue: "1" })));
+  assert.ok(accepts([{ key: follower(ALICE, "@bob"), newValue: "1" }, ...both(ALICE, "@carol", { newValue: "1" }), { key: follow(ALICE, "@bob"), newValue: "1" }]));
+  // Any name, held by anyone or by no one: who holds it is Moniker's business.
+  assert.ok(accepts(both(ALICE, "@alice", { newValue: "1" })));
+  assert.ok(accepts(both(ALICE, "@0", { newValue: "1" })));
 });
 
 test("one key without its twin is refused", () => {
-  assert.ok(!accepts([{ key: follow(ALICE, BOB), newValue: "1" }]));
-  assert.ok(!accepts([{ key: follower(ALICE, BOB), newValue: "1" }]));
-  assert.ok(!accepts([{ key: follow(ALICE, BOB), oldValue: "1" }]));
-  assert.ok(!accepts([{ key: follower(ALICE, BOB), oldValue: "1" }]));
-  // A twin of someone else's follow is no twin.
-  assert.ok(!accepts([{ key: follow(ALICE, BOB), newValue: "1" }, { key: follower(ALICE, CAROL), newValue: "1" }]));
+  assert.ok(!accepts([{ key: follow(ALICE, "@bob"), newValue: "1" }]));
+  assert.ok(!accepts([{ key: follower(ALICE, "@bob"), newValue: "1" }]));
+  assert.ok(!accepts([{ key: follow(ALICE, "@bob"), oldValue: "1" }]));
+  assert.ok(!accepts([{ key: follower(ALICE, "@bob"), oldValue: "1" }]));
+  // A twin of another follow is no twin.
+  assert.ok(!accepts([{ key: follow(ALICE, "@bob"), newValue: "1" }, { key: follower(ALICE, "@carol"), newValue: "1" }]));
+  assert.ok(!accepts([{ key: follow(ALICE, "@bob"), newValue: "1" }, { key: follower(BOB, "@bob"), newValue: "1" }], { signers: [ALICE, BOB] }));
 });
 
 test("the twins always hold the same value", () => {
-  assert.ok(!accepts([{ key: follow(ALICE, BOB), newValue: "1" }, { key: follower(ALICE, BOB), newValue: "2" }]));
-  assert.ok(!accepts([{ key: follow(ALICE, BOB), oldValue: "1" }, { key: follower(ALICE, BOB), oldValue: "1", newValue: "1" }]));
-  assert.ok(!accepts([{ key: follow(ALICE, BOB), oldValue: "1", newValue: "1" }, { key: follower(ALICE, BOB), oldValue: "1" }]));
+  assert.ok(!accepts([{ key: follow(ALICE, "@bob"), newValue: "1" }, { key: follower(ALICE, "@bob"), newValue: "2" }]));
+  assert.ok(!accepts([{ key: follow(ALICE, "@bob"), oldValue: "1" }, { key: follower(ALICE, "@bob"), oldValue: "1", newValue: "1" }]));
+  assert.ok(!accepts([{ key: follow(ALICE, "@bob"), oldValue: "1", newValue: "1" }, { key: follower(ALICE, "@bob"), oldValue: "1" }]));
 });
 
 test("nobody writes or deletes another account's follows", () => {
-  assert.ok(!accepts(both(BOB, CAROL, { newValue: "1" })));
-  assert.ok(!accepts(both(BOB, ALICE, { oldValue: "1" })));
-  assert.ok(!accepts([...both(ALICE, BOB, { newValue: "1" }), ...both(BOB, ALICE, { newValue: "1" })]));
+  assert.ok(!accepts(both(BOB, "@carol", { newValue: "1" })));
+  assert.ok(!accepts(both(BOB, "@alice", { oldValue: "1" })));
+  assert.ok(!accepts([...both(ALICE, "@bob", { newValue: "1" }), ...both(BOB, "@alice", { newValue: "1" })]));
   // Signed by both, each writes their own.
-  assert.ok(accepts([...both(ALICE, BOB, { newValue: "1" }), ...both(BOB, ALICE, { newValue: "1" })], { signers: [ALICE, BOB] }));
+  assert.ok(accepts([...both(ALICE, "@bob", { newValue: "1" }), ...both(BOB, "@alice", { newValue: "1" })], { signers: [ALICE, BOB] }));
 });
 
-test("only follows of an address by an address are records", () => {
-  for (const [a, b] of [[ALICE, "bob"], [ALICE, BOB.toUpperCase()], [ALICE, ""], ["alice", BOB]]) {
-    assert.ok(!accepts(both(a, b, { newValue: "1" })), `${a} ${b}`);
+test("only an account following a name is a record", () => {
+  for (const name of ["bob", "@Bob", "@", "@bob!", "@bob.eth", "@@bob", "@ bob", BOB, `@${BOB}x`.toUpperCase(), ""]) {
+    assert.ok(!accepts(both(ALICE, name, { newValue: "1" })), name);
   }
+  // A follower that is not a signer, or not an address, writes nothing.
+  assert.ok(!accepts(both("alice", "@bob", { newValue: "1" })));
+  assert.ok(!accepts(both("@alice", "@bob", { newValue: "1" })));
   for (const key of [
-    `user/${ALICE}/follows/${BOB}/x`,
-    `followers/${BOB}/${ALICE}/x`,
-    `user/${ALICE}/follow/${BOB}`,
+    `user/${ALICE}/follows/@bob/x`,
+    `followers/@bob/${ALICE}/x`,
+    `user/${ALICE}/follow/@bob`,
     `user/${ALICE}/profile`,
-    `users/${ALICE}/follows/${BOB}`,
-    `followers/${BOB}`,
-    `index/follower/${BOB}/${ALICE}`,
+    `users/${ALICE}/follows/@bob`,
+    `followers/@bob`,
+    `index/follower/@bob/${ALICE}`,
     "",
   ]) {
     assert.ok(!accepts([{ key, newValue: "1" }]), key);
   }
   // Twins that both run on are still not follows.
-  assert.ok(!accepts([{ key: `${follow(ALICE, BOB)}/x`, newValue: "1" }, { key: `${follower(ALICE, BOB)}/x`, newValue: "1" }]));
+  assert.ok(!accepts([{ key: `${follow(ALICE, "@bob")}/x`, newValue: "1" }, { key: `${follower(ALICE, "@bob")}/x`, newValue: "1" }]));
   // One bad action rejects the whole write.
-  assert.ok(!accepts([...both(ALICE, BOB, { newValue: "1" }), { key: `user/${ALICE}/profile`, newValue: "{}" }]));
+  assert.ok(!accepts([...both(ALICE, "@bob", { newValue: "1" }), { key: `user/${ALICE}/profile`, newValue: "{}" }]));
 });
 
 test("values mean nothing else to the chain", () => {
-  assert.ok(accepts(both(ALICE, BOB, { newValue: "" })));
-  assert.ok(accepts(both(ALICE, BOB, { newValue: JSON.stringify({ since: 1 }) })));
+  assert.ok(accepts(both(ALICE, "@bob", { newValue: "" })));
+  assert.ok(accepts(both(ALICE, "@bob", { newValue: JSON.stringify({ since: 1 }) })));
 });
 
 test("coin actions pass untouched", () => {

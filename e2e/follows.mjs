@@ -1,9 +1,10 @@
 // Follows against a real node: a private host mines Nexus and a Follows chain
 // launched from chain/spec.json with the built policy, whose genesis pays the
-// premine to Alice. Alice funds Bob and Carol. Alice and Carol follow Bob,
-// and the library reads both ends of the graph from the node. Every way of
-// writing someone else's follow, or a record that is not a follow, is
-// refused, and so is half of a follow. Last, Alice unfollows Bob.
+// premine to Alice. Alice funds Bob and Carol. Alice and Carol follow the
+// name @bob, and the library reads both ends of the graph from the node.
+// Every way of writing someone else's follow, or a record that is not a
+// follow of a name, is refused, and so is half of a follow. Last, Alice
+// unfollows @bob.
 //
 //   (cd policy && cargo build --release --target wasm32-unknown-unknown)
 //   LATTICE=<lattice-node>/.build/debug/lattice node e2e/follows.mjs
@@ -109,26 +110,26 @@ try {
   }
 
   let state = await graph.state({ fresh: true });
-  await admitted("Alice follows Bob", alice, await records.follow(state, alice.address, bob.address));
-  await admitted("Carol follows Bob", carol, await records.follow(state, carol.address, bob.address));
-  await until("both follows are mined", async () => (await graph.followers(bob.address)).length === 2);
-  assert.deepEqual(await graph.followers(bob.address), sorted(alice, carol));
-  assert.deepEqual(await graph.following(alice.address), [bob.address]);
-  assert.ok(await graph.follows(carol.address, bob.address));
-  assert.ok(!(await graph.follows(bob.address, alice.address)));
-  console.log("Bob's followers and Alice's follows read back through the library");
+  await admitted("Alice follows @bob", alice, await records.follow(state, alice.address, "bob"));
+  await admitted("Carol follows @bob", carol, await records.follow(state, carol.address, "@bob"));
+  await until("both follows are mined", async () => (await graph.followers("bob")).length === 2);
+  assert.deepEqual(await graph.followers("@bob"), sorted(alice, carol));
+  assert.deepEqual(await graph.following(alice.address), ["bob"]);
+  assert.ok(await graph.follows(carol.address, "bob"));
+  assert.ok(!(await graph.follows(bob.address, "alice")));
+  console.log("@bob's followers and Alice's follows read back through the library");
 
   state = await graph.state({ fresh: true });
-  await refused("Bob writes Alice's follow of Carol", bob, await records.follow(state, alice.address, carol.address));
-  await refused("Bob deletes Alice's follow of him", bob, await records.unfollow(state, alice.address, bob.address));
-  await refused("Bob follows a non-address", bob, { actions: [{ key: `user/${bob.address}/follows/alice`, newValue: "1" }] });
-  await refused("Bob writes his follow of Alice without its twin", bob, { actions: [{ key: records.followKey(bob.address, alice.address), newValue: "1" }] });
-  await refused("Bob lists himself as Carol's follower without following her", bob, { actions: [{ key: records.followerKey(bob.address, carol.address), newValue: "1" }] });
+  await refused("Bob writes Alice's follow of @carol", bob, await records.follow(state, alice.address, "carol"));
+  await refused("Bob deletes Alice's follow of @bob", bob, await records.unfollow(state, alice.address, "bob"));
+  await refused("Bob follows an address, not a name", bob, { actions: [records.followKey, records.followerKey].map((key) => ({ key: key(bob.address, "x").replace("@x", alice.address), newValue: "1" })) });
+  await refused("Bob writes his follow of @alice without its twin", bob, { actions: [{ key: records.followKey(bob.address, "alice"), newValue: "1" }] });
+  await refused("Bob lists himself as @carol's follower without following", bob, { actions: [{ key: records.followerKey(bob.address, "carol"), newValue: "1" }] });
   await refused("Bob writes a profile here", bob, { actions: [{ key: `user/${bob.address}/profile`, newValue: "{}" }] });
 
-  await admitted("Alice unfollows Bob", alice, await records.unfollow(state, alice.address, bob.address));
-  await until("the unfollow is mined", async () => (await graph.followers(bob.address)).length === 1);
-  assert.deepEqual(await graph.followers(bob.address), [carol.address]);
+  await admitted("Alice unfollows @bob", alice, await records.unfollow(state, alice.address, "bob"));
+  await until("the unfollow is mined", async () => (await graph.followers("bob")).length === 1);
+  assert.deepEqual(await graph.followers("bob"), [carol.address]);
   assert.deepEqual(await graph.following(alice.address), []);
   console.log("PASS");
 } finally {

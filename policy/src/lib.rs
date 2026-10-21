@@ -1,20 +1,24 @@
 //! Transaction-scope validity policy for Follows, the follow graph Lattice
 //! apps share.
 //!
-//! A follow of `<b>` by `<a>` is two keys, so that both ends read by prefix:
+//! An account follows a name: a Moniker handle, written `@<h>`, which means
+//! whoever holds it. A follow of `@<h>` by account `<a>` is two keys, so that
+//! both ends read by prefix:
 //!
-//! - `user/<a>/follows/<b>`: whom `<a>` follows.
-//! - `followers/<b>/<a>`: who follows `<b>`.
+//! - `user/<a>/follows/@<h>`: which names `<a>` follows.
+//! - `followers/@<h>/<a>`: who follows `@<h>`.
 //!
-//! Both are account addresses, and `<a>` must sign: only an account writes or
-//! deletes its own follows. A transaction that writes one key writes its twin
-//! to the same new value, or deletes both. The chain starts with neither, so
-//! the two always agree. Values mean nothing else to the chain.
+//! `<a>` is an account address and must sign: only an account writes or
+//! deletes its own follows. `<h>` is a handle as Moniker spells them,
+//! lowercase letters, digits and `_`; who holds it is Moniker's business, not
+//! this chain's. A transaction that writes one key writes its twin to the same
+//! new value, or deletes both. The chain starts with neither, so the two
+//! always agree. Values mean nothing else to the chain.
 //!
 //! Coin actions pass untouched.
 #![cfg_attr(not(test), no_std)]
 
-use lattice_policy_rules::{is_address, transaction_body, Body};
+use lattice_policy_rules::{transaction_body, Body};
 
 lattice_policy_rules::lattice_policy_abi!(crate::validate);
 
@@ -23,7 +27,8 @@ pub fn validate(context: &[u8]) -> bool {
     transaction_body(context).and_then(check_body).is_some()
 }
 
-/// A follow key read: who follows whom, and which of the two keys it is.
+/// A follow key read: which account follows which name, and which of the
+/// two keys it is.
 #[derive(PartialEq)]
 struct Follow<'a> {
     follower: &'a [u8],
@@ -71,7 +76,12 @@ fn parse(key: &[u8]) -> Option<Follow<'_>> {
         }
         _ => return None,
     };
-    // The follower must sign, so it is an address too.
-    let well_formed = segments.next().is_none() && is_address(follow.followed);
+    // The follower must sign, so it is an address.
+    let well_formed = segments.next().is_none() && is_name(follow.followed);
     well_formed.then_some(follow)
+}
+
+/// `@` and a handle: lowercase letters, digits and `_`.
+fn is_name(text: &[u8]) -> bool {
+    matches!(text, [b'@', handle @ ..] if !handle.is_empty() && handle.iter().all(|&byte| matches!(byte, b'a'..=b'z' | b'0'..=b'9' | b'_')))
 }
