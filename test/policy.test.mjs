@@ -55,6 +55,16 @@ test("an account follows, refollows and unfollows a name, both keys at once", ()
   assert.ok(accepts(both(ALICE, "@0", { newValue: "1" })));
 });
 
+test("an account follows another account by its address, and itself", () => {
+  assert.ok(accepts(both(ALICE, BOB, { newValue: "1" })));
+  assert.ok(accepts(both(ALICE, BOB, { oldValue: "1" })));
+  assert.ok(accepts(both(ALICE, ALICE, { newValue: "1" })));
+  assert.ok(accepts([...both(ALICE, BOB, { newValue: "1" }), ...both(ALICE, "@bob", { newValue: "1" })]));
+  // The account and the name are different targets: one is no twin of the other.
+  assert.ok(!accepts([{ key: follow(ALICE, BOB), newValue: "1" }, { key: follower(ALICE, "@bob"), newValue: "1" }]));
+  assert.ok(!accepts(both(BOB, ALICE, { newValue: "1" })));
+});
+
 test("one key without its twin is refused", () => {
   assert.ok(!accepts([{ key: follow(ALICE, "@bob"), newValue: "1" }]));
   assert.ok(!accepts([{ key: follower(ALICE, "@bob"), newValue: "1" }]));
@@ -79,8 +89,8 @@ test("nobody writes or deletes another account's follows", () => {
   assert.ok(accepts([...both(ALICE, "@bob", { newValue: "1" }), ...both(BOB, "@alice", { newValue: "1" })], { signers: [ALICE, BOB] }));
 });
 
-test("only an account following a name is a record", () => {
-  for (const name of ["bob", "@Bob", "@", "@bob!", "@bob.eth", "@@bob", "@ bob", BOB, `@${BOB}x`.toUpperCase(), ""]) {
+test("only an account following an account or a name is a record", () => {
+  for (const name of ["bob", "@Bob", "@", "@bob!", "@bob.eth", "@@bob", "@ bob", BOB.toUpperCase(), BOB.slice(0, -1), `${BOB}x`, `@${BOB}x`.toUpperCase(), ""]) {
     assert.ok(!accepts(both(ALICE, name, { newValue: "1" })), name);
   }
   // A follower that is not a signer, or not an address, writes nothing.

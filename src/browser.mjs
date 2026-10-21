@@ -5,5 +5,5 @@
 import * as sdk from "../vendor/lattice-sdk.js";
 import { createFollows as create } from "./index.mjs";
 
-export { DEFAULTS, isAddress, isHandle } from "./index.mjs";
+export { DEFAULTS, isAddress, isHandle, isName } from "./index.mjs";
 export const createFollows = (options = {}) => create({ sdk, ...options });

@@ -1,12 +1,12 @@
 //! Transaction-scope validity policy for Follows, the follow graph Lattice
 //! apps share.
 //!
-//! An account follows a name: a Moniker handle, written `@<h>`, which means
-//! whoever holds it. A follow of `@<h>` by account `<a>` is two keys, so that
-//! both ends read by prefix:
+//! An account follows a target: another account, by its address, or a name,
+//! a Moniker handle written `@<h>`, which means whoever holds it. A follow of
+//! `<t>` by account `<a>` is two keys, so that both ends read by prefix:
 //!
-//! - `user/<a>/follows/@<h>`: which names `<a>` follows.
-//! - `followers/@<h>/<a>`: who follows `@<h>`.
+//! - `user/<a>/follows/<t>`: what `<a>` follows.
+//! - `followers/<t>/<a>`: who follows `<t>`.
 //!
 //! `<a>` is an account address and must sign: only an account writes or
 //! deletes its own follows. `<h>` is a handle as Moniker spells them,
@@ -18,7 +18,7 @@
 //! Coin actions pass untouched.
 #![cfg_attr(not(test), no_std)]
 
-use lattice_policy_rules::{transaction_body, Body};
+use lattice_policy_rules::{is_address, transaction_body, Body};
 
 lattice_policy_rules::lattice_policy_abi!(crate::validate);
 
@@ -27,8 +27,8 @@ pub fn validate(context: &[u8]) -> bool {
     transaction_body(context).and_then(check_body).is_some()
 }
 
-/// A follow key read: which account follows which name, and which of the
-/// two keys it is.
+/// A follow key read: which account follows what, and which of the two keys
+/// it is.
 #[derive(PartialEq)]
 struct Follow<'a> {
     follower: &'a [u8],
@@ -77,7 +77,7 @@ fn parse(key: &[u8]) -> Option<Follow<'_>> {
         _ => return None,
     };
     // The follower must sign, so it is an address.
-    let well_formed = segments.next().is_none() && is_name(follow.followed);
+    let well_formed = segments.next().is_none() && (is_address(follow.followed) || is_name(follow.followed));
     well_formed.then_some(follow)
 }
 

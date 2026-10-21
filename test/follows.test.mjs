@@ -41,12 +41,28 @@ test("follows are read from both ends", async () => {
   assert.ok(submit(ALICE, await records.follow(state, ALICE, "bob")));
   assert.ok(submit(ALICE, await records.follow(state, ALICE, "@carol")));
   assert.ok(submit(CAROL, await records.follow(state, CAROL, "bob")));
-  assert.deepEqual(await records.following(state, ALICE), ["bob", "carol"]);
+  assert.deepEqual(await records.following(state, ALICE), ["@bob", "@carol"]);
   assert.deepEqual(await records.followers(state, "bob"), [ALICE, CAROL].sort());
   assert.deepEqual(await records.followers(state, "@carol"), [ALICE]);
   assert.deepEqual(await records.followers(state, "alice"), []);
   assert.ok(await records.follows(state, ALICE, "@bob"));
   assert.ok(!(await records.follows(state, BOB, "alice")));
+});
+
+test("an account follows another account, and both kinds read back as stored", async () => {
+  const { state, submit, map } = chain();
+  assert.ok(submit(ALICE, await records.follow(state, ALICE, BOB)));
+  assert.ok(submit(ALICE, await records.follow(state, ALICE, "bob")));
+  assert.ok(submit(CAROL, await records.follow(state, CAROL, BOB)));
+  assert.ok(map.has(`followers/${BOB}/${ALICE}`) && map.has(`followers/@bob/${ALICE}`));
+  // Names sort first: "@" comes before every letter.
+  assert.deepEqual(await records.following(state, ALICE), ["@bob", BOB]);
+  assert.deepEqual(await records.followers(state, BOB), [ALICE, CAROL].sort());
+  assert.deepEqual(await records.followers(state, "@bob"), [ALICE]);
+  assert.ok(await records.follows(state, CAROL, BOB));
+  assert.ok(!(await records.follows(state, CAROL, "bob")));
+  assert.ok(submit(ALICE, await records.unfollow(state, ALICE, BOB)));
+  assert.deepEqual(await records.following(state, ALICE), ["@bob"]);
 });
 
 test("unfollow deletes both keys; repeats write nothing", async () => {
@@ -70,9 +86,13 @@ test("a follow is the follower's alone", async () => {
   assert.deepEqual(await records.followers(state, "bob"), [ALICE]);
 });
 
-test("only a handle is followed", async () => {
-  for (const notHandle of ["Bob", "@", "bob smith", BOB.toUpperCase(), ""]) {
-    await assert.rejects(records.follow(chain().state, ALICE, notHandle), /not a handle/, notHandle);
+test("only an account or a name is followed", async () => {
+  for (const neither of ["Bob", "@", "bob smith", BOB.toUpperCase(), `@${BOB}`.toUpperCase(), ""]) {
+    await assert.rejects(records.follow(chain().state, ALICE, neither), /not an account or a name/, neither);
   }
-  assert.throws(() => records.followKey(ALICE, "@@bob"), /not a handle/);
+  assert.throws(() => records.followKey(ALICE, "@@bob"), /not an account or a name/);
+  // An address is an account even though its letters would make a handle; "@" makes it a name.
+  assert.equal(records.target(BOB), BOB);
+  assert.equal(records.target(`@${BOB}`), `@${BOB}`);
+  assert.equal(records.target("bob"), "@bob");
 });
