@@ -85,14 +85,18 @@ export function createFollows(options) {
           const response = await fetch(url, { cache: "no-store" });
           if (!response.ok) continue;
           const { transactions = [] } = await response.json();
-          const bodies = await Promise.all(
-            transactions.map(async (cid) => {
-              try {
-                // A transaction's volume carries its body.
-                const volume = await volumes.get(cid);
-                return sdk.decodeDagCbor(volume.bytes(sdk.decodeDagCbor(volume.rootBytes()).body.rawCID));
-              } catch {
-                return undefined;
+          // A few at a time: a full mempool must not flood the reader.
+          const bodies = [];
+          let next = 0;
+          await Promise.all(
+            Array.from({ length: Math.min(8, transactions.length) }, async () => {
+              while (next < transactions.length) {
+                const cid = transactions[next++];
+                try {
+                  // A transaction's volume carries its body.
+                  const volume = await volumes.get(cid);
+                  bodies.push(sdk.decodeDagCbor(volume.bytes(sdk.decodeDagCbor(volume.rootBytes()).body.rawCID)));
+                } catch {}
               }
             }),
           );

@@ -84,8 +84,11 @@ export function pendingIn(bodies, follower) {
   const prefix = `user/${follower}/follows/`;
   const found = {};
   for (const body of bodies) {
-    if (!body?.signers?.includes(follower)) continue;
-    for (const { key, newValue } of body.actions ?? []) if (key.startsWith(prefix)) found[key.slice(prefix.length)] = newValue !== undefined;
+    // Anyone can put anything in a mempool: read only what is shaped as a body.
+    if (!Array.isArray(body?.signers) || !body.signers.includes(follower) || !Array.isArray(body.actions)) continue;
+    for (const action of body.actions) {
+      if (typeof action?.key === "string" && action.key.startsWith(prefix)) found[action.key.slice(prefix.length)] = action.newValue !== undefined;
+    }
   }
   return found;
 }

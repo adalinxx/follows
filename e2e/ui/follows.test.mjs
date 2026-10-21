@@ -121,7 +121,7 @@ const rows = (page) => page.locator(".people li a strong");
 const names = async (page) => (await rows(page).allTextContents()).sort();
 const followButton = (page) => page.locator("follows-button button");
 const note = (page) => page.locator("follows-button .note");
-const SAVING = "Saving… about a minute. You can leave.";
+const SAVING = "Saving… about a minute.";
 /** Closes the page, which must not have thrown. */
 async function close(page) {
   assert.deepEqual(page.errors, []);
@@ -275,10 +275,16 @@ test("an account with no Moniker card shows as Unnamed account, never as an ID",
   await close(page);
 });
 
-test(`a long list (${FANS} followers) gets a filter, by name, @handle or address`, async () => {
+test(`a long list (${FANS} followers) shows 50 at a time, and its filter looks through everyone`, async () => {
   const page = await open("#/@popular/followers");
-  await expect(page.locator(".people li")).toHaveCount(FANS, { timeout: 120_000 });
-  for (const [typed, expected] of [["zoe quinn", ["Zoe Quinn"]], ["@ZOE_Q", ["Zoe Quinn"]], ["yusuf ali", ["Yusuf Ali"]], [p.fans[57].address.slice(-10), ["Unnamed account"]]]) {
+  await expect(page.locator(".people li")).toHaveCount(50, { timeout: 60_000 });
+  await page.getByRole("button", { name: "Show 50 more" }).click();
+  await expect(page.locator(".people li")).toHaveCount(100, { timeout: 60_000 });
+  // The filter reads the rest once, then answers at once.
+  await page.fill("#filter", "zoe quinn");
+  await expect(rows(page)).toHaveText(["Zoe Quinn"], { timeout: 60_000 });
+  await expect(page.getByRole("button", { name: /^Show \d+ more$/ })).toBeHidden();
+  for (const [typed, expected] of [["@ZOE_Q", ["Zoe Quinn"]], ["yusuf ali", ["Yusuf Ali"]], [p.fans[57].address.slice(-10), ["Unnamed account"]]]) {
     const started = Date.now();
     await page.fill("#filter", typed);
     await expect(rows(page)).toHaveText(expected);
@@ -421,6 +427,8 @@ test("following a name: the wallet is asked once, the button turns at once, the 
   await expect(followButton(page)).toHaveText("Following @tara");
   await expect(followButton(page)).toHaveAccessibleName("Following @tara");
   await expect(note(page)).toHaveText(SAVING);
+  // Not there yet: the button is quieter until the chain holds it.
+  assert.equal(await followButton(page).evaluate((b) => getComputedStyle(b).opacity), "0.7");
   // The button keeps its size, and the note its place, through every state.
   assert.equal((await followButton(page).boundingBox()).width, width);
   await expect(note(page)).toHaveText("Saved.", { timeout: 120_000 });
@@ -454,7 +462,7 @@ test("Following shows Unfollow under a mouse, and pressing it unfollows", async 
   await expect(followButton(page)).toHaveText("Following @tara");
   await followButton(page).hover();
   await expect(followButton(page).locator(".now")).toBeHidden();
-  assert.equal(await followButton(page).evaluate((b) => getComputedStyle(b, "::after").content), '"Unfollow"');
+  assert.equal(await followButton(page).evaluate((b) => getComputedStyle(b, "::after").content), '"Unfollow @tara"');
   const before = await counts(page).first().textContent();
   await followButton(page).click();
   await expect(followButton(page)).toHaveText("Follow @tara");
@@ -528,4 +536,39 @@ test("a follow still waiting for a block, sent from anywhere, shows as saving un
       mining("start");
     } catch {}
   }
+});
+
+test("a network blip while saving doesn't turn into a failed save", async () => {
+  const fan = newAccount();
+  let blip = false;
+  const page = await open("#/@tara", {
+    before: async (page) => {
+      await withWallet(page, fan, { slow: 6000 });
+      await page.route(`${stack.info.node}/**`, (route) => (blip ? route.abort() : route.continue()));
+    },
+  });
+  await expect(followButton(page)).toHaveText("Follow @tara");
+  await followButton(page).click();
+  await expect(note(page)).toHaveText(SAVING);
+  blip = true;
+  await page.waitForTimeout(7000);
+  blip = false;
+  await expect(note(page)).toHaveText("Saved.", { timeout: 120_000 });
+  await expect(followButton(page)).toHaveText("Following @tara");
+  await close(page);
+});
+
+test("connecting during the click to the page's own account follows nothing", async () => {
+  const page = await open("#/@tara", { before: (page) => withWallet(page, p.tara) });
+  await expect(followButton(page)).toHaveText("Follow @tara");
+  await followButton(page).click();
+  await expect(page.locator("follows-button")).toBeHidden();
+  assert.equal(page.requests.length, 0);
+  await close(page);
+});
+
+test("a malformed link shows a message, not a blank page", async () => {
+  const page = await open("#/%E0");
+  await expect(page.locator("main")).toContainText("isn't a @handle");
+  await close(page);
 });

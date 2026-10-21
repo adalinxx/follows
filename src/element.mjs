@@ -23,7 +23,7 @@
 // --follows-note-align.
 
 const WALLET_URL = "https://chromewebstore.google.com/detail/amcobhbipbblfjonmoiicihhfglkhpce";
-const SAVING = "Saving… about a minute. You can leave.";
+const SAVING = "Saving… about a minute.";
 const phone = () => /Android|iPhone|iPad|iPod|Mobile/i.test(globalThis.navigator?.userAgent ?? "");
 
 const style = `
@@ -34,12 +34,14 @@ const style = `
     border: 1px solid transparent; background: var(--follows-accent, #3346D3); color: var(--follows-accent-ink, #fff); }
   button.on { background: transparent; color: var(--follows-ink, inherit); border-color: var(--follows-line, #c9ccd4); }
   button[aria-disabled="true"] { cursor: progress; }
+  /* Saving: where it is going, but not there yet. */
+  button.saving { opacity: 0.7; }
   .now { display: block; overflow: hidden; text-overflow: ellipsis; }
   button:focus-visible { outline: 2px solid var(--follows-accent, #3346D3); outline-offset: 2px; }
   /* Under a mouse, Following offers what a press does. Drawn, not text: the name stays "Following". */
   @media (hover: hover) {
     button.on.ready:hover .now { display: none; }
-    button.on.ready:hover::after { content: "Unfollow"; }
+    button.on.ready:hover::after { content: attr(data-unfollow); }
     button.on.ready:hover { border-color: currentColor; }
   }
   .note { text-align: var(--follows-note-align, center); font-size: 0.85em; line-height: 1.35; color: var(--follows-muted, #5f6470); }
@@ -100,7 +102,8 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         const named = target.startsWith("@") ? target : this.getAttribute("label") || "this account";
         const verb = on ? "Following" : "Follow";
         this.#now.textContent = state === "loading" ? "" : `${verb}${shown}`;
-        this.#button.className = `${on ? "on" : ""} ${state === "following" ? "ready" : ""}`;
+        this.#button.className = `${on ? "on" : ""} ${state === "following" ? "ready" : ""} ${state === "saving" ? "saving" : ""}`;
+        this.#button.dataset.unfollow = `Unfollow${shown}`;
         // The name read out begins with the words shown (WCAG 2.5.3).
         this.#button.setAttribute("aria-label", `${verb} ${named}`);
         // Never disabled: a disabled button drops keyboard focus.
@@ -119,32 +122,50 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         try {
           const target = this.#target;
           const me = await wallet()?.address?.();
+          if (ticket !== this.#drawn || this.#self(me)) return;
+          const following = me ? await graph.follows(me, target) : false;
           if (ticket !== this.#drawn) return;
-          // Nobody follows themselves here.
-          if (me && (me === target || me === this.getAttribute("owner"))) {
-            this.hidden = true;
-            return;
-          }
-          const [following, pending] = me ? await Promise.all([graph.follows(me, target), graph.pending(me)]) : [false, {}];
-          if (ticket !== this.#drawn) return;
-          if (target in pending && pending[target] !== following) {
-            this.#want = pending[target];
-            this.#show("saving", SAVING);
-            await this.#landed(ticket, me, target);
-          } else this.#show(following ? "following" : "follow");
+          this.#show(following ? "following" : "follow");
+          if (!me) return;
+          // Then, without holding the button, whether a change to it is still saving.
+          const pending = await graph.pending(me).catch(() => ({}));
+          if (ticket !== this.#drawn || !(target in pending) || pending[target] === following) return;
+          this.#want = pending[target];
+          this.#show("saving", SAVING);
+          await this.#landed(ticket, me, target);
         } catch {
           if (ticket === this.#drawn) this.#show("follow", "Couldn't check whether you follow. Reload to try again.");
         }
       }
+      /** Nobody follows themselves here: hidden on your own account and your own name. */
+      #self(me) {
+        if (!me || (me !== this.#target && me !== this.getAttribute("owner"))) return false;
+        this.hidden = true;
+        return true;
+      }
       /** Waits until the chain shows the change this button is saving, then says so. */
       async #landed(ticket, me, target) {
         const started = Date.now();
+        const landed = async () => {
+          await graph.state({ fresh: true });
+          return (await graph.follows(me, target)) === this.#want;
+        };
         for (;;) {
           await new Promise((resolve) => setTimeout(resolve, 3000));
           if (ticket !== this.#drawn) return;
-          await graph.state({ fresh: true });
-          if ((await graph.follows(me, target)) === this.#want) break;
-          if (Date.now() - started > 3 * 60_000) this.#show("saving", "Still saving. This can take a few minutes.");
+          // A failed read is a blip, not a failed save: keep waiting.
+          if (await landed().catch(() => false)) break;
+          if (Date.now() - started < 3 * 60_000) continue;
+          // Long enough to ask whether it is still on its way at all.
+          const waiting = await graph.pending(me).then((pending) => target in pending, () => true);
+          if (ticket !== this.#drawn) return;
+          if (!waiting && !(await landed().catch(() => false))) {
+            // Dropped before any block took it: back as it was, and free to try again.
+            this.#show(this.#want ? "follow" : "following", "It didn't save. Try again.");
+            return;
+          }
+          if (!waiting) break;
+          this.#show("saving", "Still saving. This can take a few minutes.");
         }
         if (ticket !== this.#drawn) return;
         this.#show(this.#want ? "following" : "follow", "Saved.");
@@ -171,6 +192,7 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         try {
           // Selfhold answers connect only within a click: ask before any other wait.
           const me = (await wallet().address?.()) ?? (await wallet().connect());
+          if (this.#self(me)) return;
           const sent = await (this.#want ? graph.follow(target, { wallet: wallet() }) : graph.unfollow(target, { wallet: wallet() }));
           if (ticket !== this.#drawn) return;
           if (sent === undefined) {

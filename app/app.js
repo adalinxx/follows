@@ -31,13 +31,21 @@ const esc = (text) => String(text).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(
 const link = (who) => `#/${encodeURIComponent(who)}`;
 // A list longer than this gets a filter.
 const FILTER_FROM = 20;
+// Rows shown at first, and added by Show more.
+const PAGE = 50;
 
 // The list on screen, kept so typing in the filter redraws it without reading again.
 let shown = null;
 let filter = "";
 
 function route() {
-  const [who = "", list = ""] = decodeURIComponent(location.hash.replace(/^#\/?/, "")).split("/");
+  let hash;
+  try {
+    hash = decodeURIComponent(location.hash.replace(/^#\/?/, ""));
+  } catch {
+    hash = location.hash.replace(/^#\/?/, ""); // a malformed link: shown as typed, which no handle matches
+  }
+  const [who = "", list = ""] = hash.split("/");
   return { who, list: list === "followers" || list === "following" ? list : "" };
 }
 
@@ -178,38 +186,62 @@ async function namesOwned(address) {
 
 async function listPage(who, list, found) {
   const { followed, address } = found;
-  const rows =
-    list === "followers"
-      ? await accountRows(await graph.followers(followed))
-      : address ? await followedRows(await graph.following(address)) : [];
+  // The list itself is one prefix read; each row's card is another read, so
+  // cards are read a page at a time.
+  const all = list === "followers" ? await graph.followers(followed) : address ? await graph.following(address) : [];
+  const toRows = list === "followers" ? accountRows : followedRows;
+  const rows = await toRows(all.slice(0, PAGE));
   if (route().who !== who || route().list !== list) return; // moved on meanwhile
-  const { short } = naming(found);
+  const { short, title } = naming(found);
   const empty = list === "followers" ? "No followers yet." : address ? "Not following anyone yet." : `No one owns ${followed} yet.`;
-  shown = { who, list, rows, empty };
+  shown = { who, list, all, rows, toRows, empty };
   main.innerHTML = `
-    <a class="back" href="${esc(link(who))}">‹ ${esc(naming(found).title)}</a>
+    <a class="back" href="${esc(link(who))}">‹ ${esc(title)}</a>
     <h1 class="list-title">${esc(list === "followers" ? `${short}'s followers` : `${short} follows`)}</h1>
-    ${rows.length > FILTER_FROM ? `
+    ${all.length > FILTER_FROM ? `
       <label class="filter"><span class="sr">Filter this list</span>
         <input id="filter" type="search" placeholder="Filter by name or @handle" autocomplete="off" value="${esc(filter)}">
       </label>` : ""}
-    <p class="sr" role="status" id="results"></p>
-    <ul class="people"></ul>`;
+    <p class="muted small" role="status" id="results"></p>
+    <ul class="people"></ul>
+    <button type="button" class="more" id="more" hidden></button>`;
   const input = main.querySelector("#filter");
   if (input) {
-    input.oninput = () => {
+    input.oninput = async () => {
       filter = input.value;
+      // A filter looks through everyone: read the cards not read yet, once.
+      if (filter.trim() && shown.rows.length < shown.all.length) await more(Infinity);
       draw();
     };
   }
+  main.querySelector("#more").onclick = () => more(PAGE);
   draw();
+}
+
+/** Reads the next `n` rows' cards and shows them. */
+async function more(n) {
+  const view = shown;
+  if (view.loading) return view.loading;
+  main.querySelector("#results").textContent = "Loading…";
+  view.loading = (async () => {
+    const next = await view.toRows(view.all.slice(view.rows.length, view.rows.length + n));
+    if (shown !== view) return;
+    view.rows = [...view.rows, ...next];
+    view.loading = null;
+    draw();
+  })();
+  return view.loading;
 }
 
 function draw() {
   const ul = main.querySelector(".people");
-  const { rows, empty } = shown;
+  const { rows, all, empty } = shown;
   const kept = rows.filter((row) => matches(row, filter));
   main.querySelector("#results").textContent = filter.trim() ? count(kept.length, "result") : "";
+  const moreButton = main.querySelector("#more");
+  const left = all.length - rows.length;
+  moreButton.hidden = left === 0 || Boolean(filter.trim());
+  moreButton.textContent = `Show ${Math.min(left, PAGE)} more`;
   if (rows.length === 0) {
     ul.innerHTML = `<li class="empty muted">${esc(empty)}</li>`;
   } else if (kept.length === 0) {
@@ -274,7 +306,9 @@ addEventListener("follows:change", async () => {
   const shownCounts = main.querySelector(".counts");
   const parsed = parseWho(route().who);
   if (!shownCounts || !parsed) return;
-  const found = await lookUp(parsed);
-  shownCounts.innerHTML = countLinks(route().who, await counts(found), Boolean(found.address));
+  try {
+    const found = await lookUp(parsed);
+    shownCounts.innerHTML = countLinks(route().who, await counts(found), Boolean(found.address));
+  } catch {} // the counts stay as they were; the next visit reads them again
 });
 render();

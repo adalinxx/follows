@@ -94,17 +94,25 @@ defineFollowButton(createFollows());
 ```
 
 ```html
-<follows-button target="@ada"></follows-button>
+<follows-button target="@ada" owner="bafyrei…"></follows-button>
+<follows-button target="bafyrei…" label="Ada Lovelace"></follows-button>
 ```
 
-It reads Follow or Following for the connected account. A follow takes about
-a block (a minute on the trial) to save, so the button says "Following ·
-saving…" until a block holds it, then fires `follows:change`. A follow still
+On a name it reads "Follow @ada" / "Following @ada", so a follow of a name is
+visibly one; on an account, "Follow" / "Following" (give it `label` with the
+account's name, for screen readers). Give a name's `owner` and the button
+hides on your own name, as it does on your own account.
+
+A follow takes about a block (a minute on the trial) to save. The button
+turns at once and its note says "Saving… about a minute." until a block
+holds it, then "Saved.", and it fires `follows:change`. A follow still
 waiting in a node's mempool shows as saving too, even one sent from another
 app or device: `graph.pending(account)` finds them. With no wallet it fires
 `follows:needs-wallet`; handle that event to show your own help, or the button
-explains how to add Selfhold. Style it with `--follows-accent`,
-`--follows-ink`, `--follows-line` and `--follows-muted`.
+explains how to add Selfhold (and, on a phone, to use a computer). Style it
+with `--follows-accent`, `--follows-accent-ink`, `--follows-ink`,
+`--follows-line`, `--follows-muted`, `--follows-width` and
+`--follows-note-align`.
 
 Reads go to the first node that answers. Every trie node is checked against
 its CID, so a read doesn't depend on trusting the node that served it. Writes
