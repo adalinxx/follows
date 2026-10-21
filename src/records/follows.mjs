@@ -74,3 +74,18 @@ export async function unfollow(state, follower, followed) {
   if (oldValues[0] === undefined) return { actions: [] };
   return { actions: keys.map((key, i) => ({ key, oldValue: oldValues[i] })) };
 }
+
+/**
+ * What `follower` is saving, from transaction bodies not yet in a block:
+ * `{ target: true }` for a follow, `{ target: false }` for an unfollow. A
+ * pending write may still be dropped, so it is never a follow yet.
+ */
+export function pendingIn(bodies, follower) {
+  const prefix = `user/${follower}/follows/`;
+  const found = {};
+  for (const body of bodies) {
+    if (!body?.signers?.includes(follower)) continue;
+    for (const { key, newValue } of body.actions ?? []) if (key.startsWith(prefix)) found[key.slice(prefix.length)] = newValue !== undefined;
+  }
+  return found;
+}

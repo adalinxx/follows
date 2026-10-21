@@ -10,6 +10,7 @@
 // chain) and `?moniker=` (the Moniker chain) to read somewhere else.
 import * as sdk from "../vendor/lattice-sdk.js";
 import { createFollows } from "../src/index.mjs";
+import { defineFollowButton } from "../src/element.mjs";
 import { createMoniker } from "./vendor/moniker-sdk/src/index.mjs";
 import { count, label, matches, parseWho, shortAddress, whoPath } from "./lib.mjs";
 
@@ -17,6 +18,7 @@ const params = new URLSearchParams(location.search);
 const nodes = params.get("node")?.split(",");
 const chainOf = (name) => params.get(name)?.split("/");
 const graph = createFollows({ sdk, ...(nodes && { nodes }), ...(chainOf("chain") && { chain: chainOf("chain") }) });
+defineFollowButton(graph);
 const moniker = createMoniker({ sdk, app: "https://app.moniker.bio/", ...(nodes && { nodes }), ...(chainOf("moniker") && { chain: chainOf("moniker") }) });
 
 const main = document.querySelector("main");
@@ -58,7 +60,7 @@ async function render() {
     if (route().who !== who || route().tab !== tab) return; // moved on meanwhile
     const empty = tab === "followers" ? "No followers yet." : address ? "Not following anyone yet." : `No one holds @${handle}, so it follows no one.`;
     shown = { who, tab, rows, empty };
-    page({ person, address, handle, other, others: others.length }, followers.length, following.length);
+    page({ followed, person, address, handle, other, others: others.length }, followers.length, following.length);
   } catch (error) {
     console.error(error);
     main.innerHTML = `<div class="status"><p>Couldn't reach the Follows nodes.</p><button type="button" id="retry">Try again</button></div>`;
@@ -116,7 +118,7 @@ function message(text) {
   main.innerHTML = `<p class="status">${esc(text)}</p>`;
 }
 
-function page({ person, address, handle, other, others }, followers, following) {
+function page({ followed, person, address, handle, other, others }, followers, following) {
   // The tabs keep how the page was reached: a @handle or an address.
   const { who, tab } = route();
   const base = `#/${encodeURIComponent(who)}`;
@@ -126,7 +128,7 @@ function page({ person, address, handle, other, others }, followers, following) 
   const also = other ? ` · <a href="#/${encodeURIComponent(other)}">${count(others, "follower")} of ${other === address ? "the account" : esc(other)}</a>` : "";
   const detail = address
     ? `${handle && title !== `@${handle}` ? `@${esc(handle)} · ` : ""}<span class="mono">${esc(shortAddress(address))}</span>
-       · <a href="${esc(moniker.pageURL(address))}" target="_blank" rel="noopener">Moniker page</a>${also}`
+       · <a href="${esc(moniker.pageURL(followed))}" target="_blank" rel="noopener">Moniker page</a>${also}`
     : "No one holds this name yet.";
   main.innerHTML = `
     <section class="person">
@@ -136,6 +138,10 @@ function page({ person, address, handle, other, others }, followers, following) 
         <p class="muted">${detail}</p>
       </div>
     </section>
+    <div class="follow">
+      <follows-button target="${esc(followed)}" label="${esc(followed === address ? title : followed)}"></follows-button>
+      <p class="muted small">${followed === address ? "You follow this account, whatever names it holds." : `You follow whoever owns ${esc(followed)}.`}</p>
+    </div>
     <nav class="tabs" aria-label="Lists">
       <a href="${base}" ${tab === "followers" ? 'aria-current="page"' : ""}>${count(followers, "follower")}</a>
       <a href="${base}/following" ${tab === "following" ? 'aria-current="page"' : ""}>${count(following, "following", "following")}</a>
@@ -198,4 +204,6 @@ document.querySelector("#find").onsubmit = (event) => {
   location.hash = `#/${encodeURIComponent(who.address ?? `@${who.handle}`)}`;
 };
 addEventListener("hashchange", render);
+// A follow or unfollow saved: redraw, so the counts include it.
+addEventListener("follows:change", render);
 render();

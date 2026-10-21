@@ -19,7 +19,7 @@ import { writeRequest } from "./records/wallet.mjs";
 
 /** Where Follows lives now: its testnet trial chain and the shared hosts. */
 export const DEFAULTS = {
-  chain: ["Nexus", "testnet", "follows-f585dc"],
+  chain: ["Nexus", "testnet", "follows-6ed91a"],
   nodes: ["https://lattice-testnet-apps-iad.fly.dev", "https://lattice-testnet-apps-ams.fly.dev"],
   // The trial chain's hosts admit 0-fee transactions: writes are free.
   fee: 0n,
@@ -73,6 +73,34 @@ export function createFollows(options) {
     followers: async (followed) => records.followers(await state(), followed),
     /** Whether account `follower` follows `followed`. */
     follows: async (follower, followed) => records.follows(await state(), follower, followed),
+    /**
+     * What account `follower` is saving now: follows (`true`) and unfollows
+     * (`false`) waiting in the first answering node's mempool, by target.
+     */
+    pending: async (follower) => {
+      for (const node of nodes) {
+        try {
+          const url = new URL("/api/mempool", node);
+          url.searchParams.set("chainPath", chain.join("/"));
+          const response = await fetch(url, { cache: "no-store" });
+          if (!response.ok) continue;
+          const { transactions = [] } = await response.json();
+          const bodies = await Promise.all(
+            transactions.map(async (cid) => {
+              try {
+                // A transaction's volume carries its body.
+                const volume = await volumes.get(cid);
+                return sdk.decodeDagCbor(volume.bytes(sdk.decodeDagCbor(volume.rootBytes()).body.rawCID));
+              } catch {
+                return undefined;
+              }
+            }),
+          );
+          return records.pendingIn(bodies, follower);
+        } catch {}
+      }
+      return {};
+    },
 
     /** The connected account follows `followed`, an address or a name. Resolves to undefined when it already does. */
     follow: async (followed, { wallet }) => {

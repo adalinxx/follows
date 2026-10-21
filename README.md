@@ -69,7 +69,7 @@ python3 -m http.server 8767   # from the repository root, then open http://127.0
 ## Use Follows in your app
 
 ```js
-import { createFollows } from "https://cdn.jsdelivr.net/gh/adalinxx/follows@v0.1.0/src/browser.mjs";
+import { createFollows } from "https://cdn.jsdelivr.net/gh/adalinxx/follows@v0.2.0/src/browser.mjs";
 
 const graph = createFollows();                    // testnet trial by default; or { nodes, chain }
 const followed = await graph.following(address);  // what they follow: ["@ada", "bafyrei…"]
@@ -85,6 +85,27 @@ await graph.unfollow(address, { wallet });
 A target is an address or a name. A name may be given without its `@`; an
 address is never mistaken for one.
 
+A Follow button for any page, which asks Selfhold only when pressed:
+
+```js
+import { createFollows, defineFollowButton } from "https://cdn.jsdelivr.net/gh/adalinxx/follows@v0.2.0/src/browser.mjs";
+
+defineFollowButton(createFollows());
+```
+
+```html
+<follows-button target="@ada"></follows-button>
+```
+
+It reads Follow or Following for the connected account. A follow takes about
+a block (a minute on the trial) to save, so the button says "Following ·
+saving…" until a block holds it, then fires `follows:change`. A follow still
+waiting in a node's mempool shows as saving too, even one sent from another
+app or device: `graph.pending(account)` finds them. With no wallet it fires
+`follows:needs-wallet`; handle that event to show your own help, or the button
+explains how to add Selfhold. Style it with `--follows-accent`,
+`--follows-ink`, `--follows-line` and `--follows-muted`.
+
 Reads go to the first node that answers. Every trie node is checked against
 its CID, so a read doesn't depend on trusting the node that served it. Writes
 go to the person's wallet, which shows each one and signs it. The library
@@ -98,8 +119,9 @@ pass the SDK in: `createFollows({ sdk })`.
 - `policy/`: the chain's validity policy (Rust, built to wasm). It uses the
   shared rules crate from Moniker. `policy/host-check` replays the test
   contexts through Lattice's own evaluator.
-- `chain/spec.json`: the chain spec, which names the policy module by CID.
-- `src/`: the library. `src/records/follows.mjs` holds the records,
+- `chain/spec.json`: the chain spec, which names the policy module by CID;
+  `chain/follows_policy.wasm` is that module, built.
+- `src/`: the library. `src/element.mjs` is `<follows-button>`. `src/records/follows.mjs` holds the records,
   `state.mjs` reads state by walking down the trie, and `wallet.mjs` builds
   the wallet request. `state.mjs` and `wallet.mjs` are copied from
   moniker-sdk.

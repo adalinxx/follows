@@ -96,3 +96,11 @@ test("only an account or a name is followed", async () => {
   assert.equal(records.target(`@${BOB}`), `@${BOB}`);
   assert.equal(records.target("bob"), "@bob");
 });
+
+test("a follow or unfollow waiting for a block is found in transaction bodies", () => {
+  const follow = { signers: [ALICE], actions: [{ key: records.followKey(ALICE, "bob"), newValue: "1" }, { key: records.followerKey(ALICE, "bob"), newValue: "1" }] };
+  const unfollow = { signers: [ALICE], actions: [{ key: records.followKey(ALICE, CAROL), oldValue: "1" }, { key: records.followerKey(ALICE, CAROL), oldValue: "1" }] };
+  const others = { signers: [BOB], actions: [{ key: records.followKey(BOB, "alice"), newValue: "1" }] };
+  assert.deepEqual(records.pendingIn([follow, unfollow, others, undefined, {}], ALICE), { "@bob": true, [CAROL]: false });
+  assert.deepEqual(records.pendingIn([others], ALICE), {});
+});

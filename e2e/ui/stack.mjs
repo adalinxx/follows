@@ -105,6 +105,7 @@ export async function start() {
   }
   const web = await serve(ports.web);
   const info = {
+    root,
     node,
     rpc: `http://127.0.0.1:${ports.rpc}`,
     cookie: () => readFileSync(`${root}/chains/Nexus/.cookie`, "utf8").trim(),
