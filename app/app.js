@@ -146,7 +146,7 @@ async function profilePage(who, profile) {
         ${profile.handle && profile.name ? `<p class="muted names">@${esc(profile.handle)}</p>` : ""}
         ${profile.description ? `<p class="bio">${esc(profile.description)}</p>` : ""}
         <p class="links">
-          <button type="button" class="copy" data-copy="${esc(profile.id)}">Copy ID</button>
+          <button type="button" class="copy" data-copy="${esc(profile.id)}">Copy profile ID</button>
           <a href="${esc(moniker.pageURL(profile.handle ? `@${profile.handle}` : profile.id))}" target="_blank" rel="noopener">Moniker page</a>
         </p>
         <p class="sr" role="status" id="copied"></p>
@@ -158,7 +158,7 @@ async function profilePage(who, profile) {
   copy.onclick = () => navigator.clipboard?.writeText(copy.dataset.copy).then(() => {
     copy.textContent = "Copied";
     main.querySelector("#copied").textContent = "Profile ID copied";
-    setTimeout(() => (copy.textContent = "Copy ID"), 2000);
+    setTimeout(() => (copy.textContent = "Copy profile ID"), 2000);
   });
   photos();
 }

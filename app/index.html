@@ -99,6 +99,8 @@ follows-button { --follows-accent: var(--accent); --follows-ink: var(--ink); --f
   #find { flex-basis: 100%; }
   .home h1 { font-size: 26px; }
 }
+/* A heading focused after a page change marks where to start reading, without a ring. */
+h1[tabindex="-1"]:focus { outline: none; }
 </style>
 </head>
 <body>

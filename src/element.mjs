@@ -102,10 +102,11 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         this.#now = Object.assign(document.createElement("span"), { className: "now" });
         this.#button.append(this.#now);
         this.#picker = Object.assign(document.createElement("select"), { hidden: true });
-        this.#picker.setAttribute("aria-label", "Follow as");
+        this.#picker.setAttribute("aria-label", "Who follows");
         this.#note = Object.assign(document.createElement("span"), { className: "note" });
         this.#note.setAttribute("role", "status");
-        root.append(Object.assign(document.createElement("style"), { textContent: style }), this.#button, this.#picker, this.#note);
+        // Who follows comes first: it is chosen before Follow is pressed.
+        root.append(Object.assign(document.createElement("style"), { textContent: style }), this.#picker, this.#button, this.#note);
         this.#button.addEventListener("click", () => this.#press());
         this.#picker.addEventListener("change", () => {
           choose(this.#picker.value);
@@ -187,7 +188,7 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         this.#as = picked ?? ids[0];
         this.#picker.hidden = mine.length < 2;
         this.#picker.replaceChildren(
-          ...mine.map((p) => Object.assign(document.createElement("option"), { value: p.id, textContent: `as ${graph.moniker.label(p)}`, selected: p.id === this.#as })),
+          ...mine.map((p) => Object.assign(document.createElement("option"), { value: p.id, textContent: `as ${graph.moniker.label(p)}${p.name && p.handle ? ` · @${p.handle}` : ""}`, selected: p.id === this.#as })),
         );
         return true;
       }
@@ -246,7 +247,10 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
           if (!known && !(await this.#follower(me))) return;
           if (ticket !== this.#drawn) return;
           if (!this.#as) {
-            this.#show(before, `To follow, make a profile on <a href="${escape(monikerURL)}" target="_blank" rel="noopener">Moniker</a>, then reload this page.`);
+            // On Moniker itself, the link stays on the page.
+            this.#show(before, monikerURL.startsWith("#")
+              ? `To follow, <a href="${escape(monikerURL)}">get a name</a> first. It makes your profile.`
+              : `To follow, make a profile on <a href="${escape(monikerURL)}" target="_blank" rel="noopener">Moniker</a>, then reload this page.`);
             return;
           }
           if (!known && this.#mine.length > 1) {

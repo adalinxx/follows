@@ -195,7 +195,7 @@ test("a handle may be typed without @ and in capitals", async () => {
   }
 });
 
-test("a profile ID opens the profile, and Copy ID copies it", async () => {
+test("a profile ID opens the profile, and Copy profile ID copies it", async () => {
   const page = await open();
   await page.fill("#search", P.ada);
   await page.press("#search", "Enter");
@@ -203,7 +203,7 @@ test("a profile ID opens the profile, and Copy ID copies it", async () => {
   assert.ok(page.url().endsWith(`#/${P.ada}`), page.url());
   await expect(counts(page)).toHaveText(["4 followers", "3 following"]);
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.getByRole("button", { name: "Copy ID" }).click();
+  await page.getByRole("button", { name: "Copy profile ID" }).click();
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), P.ada);
   await expect(page.locator("#copied")).toHaveText("Profile ID copied");
   await close(page);
@@ -497,9 +497,9 @@ test("an account with two profiles picks which follows, and the choice is rememb
   const page = await open("#/@tara", { before: (page) => withWallet(page, p.two, { connected: true }) });
   await expect(picker(page)).toBeVisible();
   await expect(picker(page).locator("option")).toHaveCount(2);
-  assert.deepEqual((await picker(page).locator("option").allTextContents()).sort(), ["as Twin A", "as Twin B"]);
-  await expect(picker(page)).toHaveAccessibleName("Follow as");
-  await picker(page).selectOption({ label: "as Twin B" });
+  assert.deepEqual((await picker(page).locator("option").allTextContents()).sort(), ["as Twin A · @twin_a", "as Twin B · @twin_b"]);
+  await expect(picker(page)).toHaveAccessibleName("Who follows");
+  await picker(page).selectOption({ label: "as Twin B · @twin_b" });
   await expect(followButton(page)).toHaveText("Follow @tara");
   await followButton(page).click();
   await expect(note(page)).toHaveText("Saved.", { timeout: 120_000 });
@@ -508,7 +508,7 @@ test("an account with two profiles picks which follows, and the choice is rememb
   await expect(picker(page)).toHaveValue(P.twinB);
   await expect(followButton(page)).toHaveText("Following @tara");
   // Twin A follows nothing yet.
-  await picker(page).selectOption({ label: "as Twin A" });
+  await picker(page).selectOption({ label: "as Twin A · @twin_a" });
   await expect(followButton(page)).toHaveText("Follow @tara");
   await close(page);
 });
