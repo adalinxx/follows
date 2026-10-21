@@ -66,25 +66,29 @@ export function client(node) {
   return {
     state,
     submit,
-    /** Account `who` follows each of `handles`, in one transaction. */
-    follow: async (who, ...handles) => {
+    write,
+    /** A new profile owned by `who`, with `card` and the free name `handle` if given; its id, once landed. */
+    profile: async (who, card, handle) => {
+      const { id, write: created } = await profile.createProfile(await state.moniker(), who.address, { card, handle });
+      await write(MONIKER, who, created.actions);
+      return id;
+    },
+    /** Account `who`, acting for profile `p`, follows each of `targets`, in one transaction. */
+    follow: async (who, p, ...targets) => {
       const s = await state.follows();
       const actions = [];
-      for (const h of handles) actions.push(...(await follows.follow(s, who.address, h)).actions);
+      for (const t of targets) actions.push(...(await follows.follow(s, who.address, p, t)).actions);
       await write(FOLLOWS, who, actions);
     },
-    /** The actions for `who` following `handle`, unsent. */
-    followActions: async (who, handle) => (await follows.follow(await state.follows(), who.address, handle)).actions,
-    unfollow: async (who, handle) => write(FOLLOWS, who, (await follows.unfollow(await state.follows(), who.address, handle)).actions),
-    /** `who` claims `handle` on Moniker, with `card` for it, in one transaction. */
-    card: async (who, card, handle) => {
-      const claim = await profile.claim(await state.moniker(), who.address, handle);
-      await write(MONIKER, who, [...claim.actions, { key: profile.cardKey(who.address, handle), newValue: JSON.stringify(card) }]);
-    },
-    /** `from` gives `handle` to `to`. */
-    give: async (from, handle, to) => {
-      const s = await state.moniker();
-      await write(MONIKER, from, (await profile.transfer(s, await profile.resolve(s, handle), to.address)).actions);
+    /** The actions for `who`, as `p`, following `t`, unsent. */
+    followActions: async (who, p, t) => (await follows.follow(await state.follows(), who.address, p, t)).actions,
+    unfollow: async (who, p, t) => write(FOLLOWS, who, (await follows.unfollow(await state.follows(), who.address, p, t)).actions),
+    /** `owner` makes account `admin` an admin of its profile `p`. */
+    admin: async (owner, p, admin) => write(MONIKER, owner, (await profile.setAdmin(await state.moniker(), owner.address, p, admin.address)).actions),
+    /** `from` offers its profile `p` to `to`, who takes it. */
+    hand: async (from, p, to) => {
+      await write(MONIKER, from, (await profile.setProfileTerms(await state.moniker(), from.address, p, { offer: to.address })).actions);
+      await write(MONIKER, to, (await profile.takeProfile(await state.moniker(), to.address, p)).actions);
     },
   };
 }
