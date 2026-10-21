@@ -1,7 +1,9 @@
 // Acceptance tests for the Follows page: the real page (app/) in Chromium
 // against a private Lattice stack (stack.mjs) with a Follows chain and a
-// Moniker chain, seeded below. Each test is one thing a person does, checked
-// by what the page then shows. The page only reads, so no wallet is needed.
+// Moniker chain, seeded below. Accounts follow names (Moniker handles) and
+// accounts. Each
+// test is one thing a person does, checked by what the page then shows. The
+// page only reads, so no wallet is needed.
 //
 //   (cd policy && cargo build --release --target wasm32-unknown-unknown)
 //   cd e2e/ui && npm install && LATTICE=<lattice-node>/.build/debug/lattice npm test
@@ -34,7 +36,7 @@ before(async () => {
     c.card(p.ada, { name: "Ada Lovelace", avatar: png }, "ada"),
     c.card(p.bob, { name: "Bob Stone" }, "bob"),
     c.card(p.cara, { name: "Cara Diaz" }),
-    c.card(p.eve, { name: HOSTILE, avatar: svg }),
+    c.card(p.eve, { name: HOSTILE, avatar: svg }, "eve"),
     c.card(p.solo, { name: "Solo" }, "solo"),
     c.card(p.one, { name: "Only One" }, "one"),
     c.card(p.narc, { name: "Narcissus" }, "narc"),
@@ -42,21 +44,23 @@ before(async () => {
     c.card(p.swapB, { name: "Second Holder" }),
     c.card(p.popular, { name: "Popular" }, "popular"),
   ]);
+  // Accounts follow names and accounts. Nobody holds @ghost.
   await Promise.all([
-    c.follow(p.bob, p.ada, p.one),
-    c.follow(p.cara, p.ada, p.swapA),
-    c.follow(p.dan, p.ada, p.swapB),
-    c.follow(p.eve, p.ada),
-    c.follow(p.ada, p.bob, p.cara),
-    c.follow(p.narc, p.narc),
-    c.follow(p.swapB, p.bob),
+    c.follow(p.bob, "ada", "one"),
+    c.follow(p.cara, "ada", "swap", p.ada.address),
+    c.follow(p.dan, "ada", "swap"),
+    c.follow(p.eve, "ada"),
+    c.follow(p.ada, "bob", "eve", "ghost", p.cara.address),
+    c.follow(p.narc, "narc"),
+    c.follow(p.swapA, "bob"),
+    c.follow(p.swapB, "one"),
   ]);
   // Many followers: each fan signs their own follow; sent together, then waited for.
   p.fans = Array.from({ length: FANS }, newAccount);
-  for (const fan of p.fans) await c.submit(FOLLOWS, fan, await c.followActions(fan, p.popular));
+  for (const fan of p.fans) await c.submit(FOLLOWS, fan, await c.followActions(fan, "popular"));
   await until("every fan's follow lands", async () => {
     let n = 0;
-    for await (const _ of (await c.state.follows()).list(`followers/${p.popular.address}/`)) n++;
+    for await (const _ of (await c.state.follows()).list("followers/@popular/")) n++;
     return n === FANS;
   });
   browser = await chromium.launch();
@@ -96,13 +100,15 @@ test("the front page says what Follows is and puts the cursor in the search", as
   await close(page);
 });
 
-test("searching a @handle shows who follows them, with names from Moniker", async () => {
+test("searching a @handle shows who follows the name, with names from Moniker", async () => {
   const page = await open();
   await page.fill("#search", "@ada");
   await page.click("#find button");
   await expect(title(page)).toHaveText("Ada Lovelace");
+  await expect(page.locator(".person p")).toContainText(`@ada · ${short(p.ada.address)}`);
+  await expect(page.locator(".person p")).toContainText("1 follower of the account");
   await expect(page.locator(".tabs a").first()).toHaveText("4 followers");
-  await expect(page.locator(".tabs a").last()).toHaveText("2 following");
+  await expect(page.locator(".tabs a").last()).toHaveText("4 following");
   await expect(rows(page)).toHaveCount(4);
   assert.deepEqual(await names(page), ["Bob Stone", "Cara Diaz", HOSTILE, short(p.dan.address)].sort());
   assert.match(page.url(), /#\/%40ada$/);
@@ -119,12 +125,28 @@ test("a handle may be typed without @ and in capitals", async () => {
   }
 });
 
-test("searching an address finds the account", async () => {
+test("searching an address finds the account, whose followers are the account's own", async () => {
+  const page = await open();
+  await page.fill("#search", p.ada.address);
+  await page.press("#search", "Enter");
+  await expect(title(page)).toHaveText("Ada Lovelace");
+  await expect(page.locator(".tabs a").first()).toHaveText("1 follower");
+  await expect(rows(page)).toHaveText(["Cara Diaz"]);
+  // The name it shows has followers of its own, a link away.
+  await page.click("text=4 followers of @ada");
+  await expect(page.locator(".tabs a").first()).toHaveText("4 followers");
+  assert.match(page.url(), /#\/%40ada$/);
+  await page.click("text=1 follower of the account");
+  await expect(rows(page)).toHaveText(["Cara Diaz"]);
+  await close(page);
+});
+
+test("the tabs keep the address an account was found by", async () => {
   const page = await open();
   await page.fill("#search", p.bob.address);
   await page.press("#search", "Enter");
   await expect(title(page)).toHaveText("Bob Stone");
-  await expect(page.locator(".tabs a").first()).toHaveText("2 followers");
+  await expect(page.locator(".tabs a").first()).toHaveText("0 followers");
   // Bob shows @bob, but the tabs keep the address he was found by.
   await page.locator(".tabs a").last().click();
   await expect(page.locator(".tabs a[aria-current=page]")).toHaveText(/following$/);
@@ -140,34 +162,58 @@ test("a search that is neither a handle nor an address says so", async () => {
   await close(page);
 });
 
-test("a handle nobody holds says so", async () => {
-  const page = await open("#/@nobody_has_this");
-  await expect(page.locator("main")).toHaveText("No one holds @nobody_has_this.");
+test("a name nobody holds says so, and shows who follows it anyway", async () => {
+  let page = await open("#/@nobody_has_this");
+  await expect(title(page)).toHaveText("@nobody_has_this");
+  await expect(page.locator(".person p")).toHaveText("No one holds this name yet.");
+  await expect(page.locator(".people")).toHaveText("No followers yet.");
+  await close(page);
+  page = await open("#/@ghost");
+  await expect(title(page)).toHaveText("@ghost");
+  await expect(rows(page)).toHaveText(["Ada Lovelace"]);
+  await page.click("text=0 following");
+  await expect(page.locator(".people")).toHaveText("No one holds @ghost, so it follows no one.");
   await close(page);
 });
 
-test("the Following tab lists whom they follow", async () => {
+test("the Following tab lists the names and accounts they follow, a name as whoever holds it", async () => {
   const page = await open("#/@ada");
   await expect(rows(page)).toHaveCount(4);
-  await page.click("text=2 following");
-  await expect(page.locator(".tabs a[aria-current=page]")).toHaveText("2 following");
-  await expect(rows(page)).toHaveCount(2);
-  assert.deepEqual(await names(page), ["Bob Stone", "Cara Diaz"]);
+  await page.click("text=4 following");
+  await expect(page.locator(".tabs a[aria-current=page]")).toHaveText("4 following");
+  await expect(rows(page)).toHaveCount(4);
+  assert.deepEqual(await names(page), ["@ghost", "Bob Stone", "Cara Diaz", HOSTILE].sort());
+  await expect(page.locator(".people li", { hasText: "Bob Stone" })).toContainText(`@bob · ${short(p.bob.address)}`);
+  await expect(page.locator(".people li", { hasText: "@ghost" })).toContainText("@ghost · No one holds this name");
+  await expect(page.locator(".people li", { hasText: "Cara Diaz" })).toContainText(short(p.cara.address));
   assert.match(page.url(), /#\/%40ada\/following$/);
-  await expect(page.locator("#filter")).toHaveAttribute("placeholder", "Search people they follow");
+  await expect(page.locator("#filter")).toHaveAttribute("placeholder", "Search who they follow");
+  await page.click("text=Cara Diaz");
+  await expect(title(page)).toHaveText("Cara Diaz");
+  assert.ok(page.url().endsWith(`#/${p.cara.address}`), page.url());
+  await page.goBack();
+  await page.click("text=@ghost");
+  await expect(title(page)).toHaveText("@ghost");
   await close(page);
 });
 
 test("a link to someone's Following tab opens it", async () => {
   const page = await open("#/@ada/following");
-  await expect(page.locator(".tabs a[aria-current=page]")).toHaveText("2 following");
-  await expect(rows(page)).toHaveCount(2);
+  await expect(page.locator(".tabs a[aria-current=page]")).toHaveText("4 following");
+  await expect(rows(page)).toHaveCount(4);
   await close(page);
 });
 
 test("counts read naturally: one follower, nobody followed", async () => {
-  const page = await open("#/@one");
+  const page = await open("#/@eve");
   await expect(page.locator(".tabs a").first()).toHaveText("1 follower");
+  await expect(page.locator(".tabs a").last()).toHaveText("1 following");
+  await close(page);
+});
+
+test("counts read naturally: none at all", async () => {
+  const page = await open("#/@solo");
+  await expect(page.locator(".tabs a").first()).toHaveText("0 followers");
   await expect(page.locator(".tabs a").last()).toHaveText("0 following");
   await close(page);
 });
@@ -185,6 +231,11 @@ test("the filter matches by name, @handle or part of an address", async () => {
   await expect(page.locator(".people")).toHaveText("No one here matches “zzz”.");
   await page.fill("#filter", "");
   await expect(rows(page)).toHaveCount(4);
+  // On the Following tab, a name nobody holds is found by its handle.
+  await page.click("text=4 following");
+  await expect(page.locator(".tabs a[aria-current=page]")).toHaveText("4 following");
+  await page.fill("#filter", "ghost");
+  await expect(rows(page)).toHaveText(["@ghost"]);
   await close(page);
 });
 
@@ -192,8 +243,9 @@ test("the filter starts empty on the other tab", async () => {
   const page = await open("#/@ada");
   await expect(rows(page)).toHaveCount(4);
   await page.fill("#filter", "bob");
-  await page.click("text=2 following");
-  await expect(rows(page)).toHaveCount(2);
+  await page.click("text=4 following");
+  await expect(page.locator(".tabs a[aria-current=page]")).toHaveText("4 following");
+  await expect(rows(page)).toHaveCount(4);
   await expect(page.locator("#filter")).toHaveValue("");
   await close(page);
 });
@@ -219,10 +271,14 @@ test("someone with no follows either way sees both empty lists, without a filter
 });
 
 test("an account with no Moniker card is shown by a short address", async () => {
-  const page = await open(`#/${p.dan.address}/following`);
+  const page = await open(`#/${p.dan.address}`);
   await expect(title(page)).toHaveText(short(p.dan.address));
+  await expect(page.locator(".tabs a").first()).toHaveText("0 followers");
+  await expect(page.locator(".people")).toHaveText("No followers yet.");
+  await expect(page.locator(".person p")).not.toContainText("follower");
+  await page.click("text=2 following");
   await expect(rows(page)).toHaveCount(2);
-  assert.deepEqual(await names(page), ["Ada Lovelace", "Second Holder"]);
+  assert.deepEqual(await names(page), ["Ada Lovelace", "First Holder"]);
   await close(page);
 });
 
@@ -258,24 +314,34 @@ test("someone who follows themself is in both their lists", async () => {
   await close(page);
 });
 
-test("a handle that changed hands shows its new holder's follows", async () => {
+test("a name that changes hands keeps its followers, and shows its new holder", async () => {
   let page = await open("#/@swap");
   await expect(title(page)).toHaveText("First Holder");
-  await expect(rows(page)).toHaveText(["Cara Diaz"]);
+  await expect(rows(page)).toHaveCount(2);
+  assert.deepEqual(await names(page), ["Cara Diaz", short(p.dan.address)].sort());
+  await page.click("text=1 following");
+  await expect(rows(page)).toHaveText(["Bob Stone"]);
   await close(page);
   await c.give(p.swapA, "swap", p.swapB);
   page = await open("#/@swap");
   await expect(title(page)).toHaveText("Second Holder");
-  await expect(rows(page)).toHaveText([short(p.dan.address)]);
+  await expect(rows(page)).toHaveCount(2);
+  assert.deepEqual(await names(page), ["Cara Diaz", short(p.dan.address)].sort());
+  // Whom the name follows is whom its holder follows.
   await page.click("text=1 following");
-  await expect(rows(page)).toHaveText(["Bob Stone"]);
+  await expect(rows(page)).toHaveText(["Only One"]);
+  // And everyone following @swap now sees the new holder in their list.
+  await page.goto(`${stack.info.app}${query()}#/${p.cara.address}/following`);
+  const swap = page.locator(".people li", { hasText: "@swap" });
+  await expect(swap.locator("strong")).toHaveText("Second Holder");
+  await expect(swap).toContainText(`@swap · ${short(p.swapB.address)}`);
   await close(page);
 });
 
 test("an unfollow shows on the next visit", async () => {
-  const page = await open("#/@one");
-  await expect(rows(page)).toHaveText(["Bob Stone"]);
-  await c.unfollow(p.bob, p.one);
+  const page = await open("#/@eve");
+  await expect(rows(page)).toHaveText(["Ada Lovelace"]);
+  await c.unfollow(p.ada, "eve");
   await page.reload();
   await expect(page.locator(".tabs a").first()).toHaveText("0 followers");
   await expect(page.locator(".people")).toHaveText("No followers yet.");

@@ -42,19 +42,63 @@ async function render() {
   if (shown?.who !== who || shown?.tab !== tab) filter = "";
   main.innerHTML = `<p class="status muted">Loading…</p>`;
   try {
+    // A name's page lists who follows the name and shows whoever holds it now;
+    // an account's lists who follows the account. Each links to the other.
+    const followed = parsed.handle ? `@${parsed.handle}` : parsed.address;
     const address = parsed.address ?? (await moniker.resolve(parsed.handle));
-    if (!address) return message(`No one holds @${parsed.handle}.`);
-    const [person, followers, following] = await Promise.all([moniker.profile(address), graph.followers(address), graph.following(address)]);
-    const listed = tab === "followers" ? followers : following;
-    const people = await moniker.profiles(listed);
+    const person = address && (await moniker.profile(address));
+    const handle = parsed.handle ?? person.handle;
+    const other = parsed.handle ? address : handle && `@${handle}`;
+    const [followers, following, others] = await Promise.all([
+      graph.followers(followed),
+      address ? graph.following(address) : [],
+      other ? graph.followers(other) : [],
+    ]);
+    const rows = tab === "followers" ? await accounts(followers) : await targets(following);
     if (route().who !== who || route().tab !== tab) return; // moved on meanwhile
-    shown = { who, tab, people };
-    page(person, followers.length, following.length);
+    const empty = tab === "followers" ? "No followers yet." : address ? "Not following anyone yet." : `No one holds @${handle}, so it follows no one.`;
+    shown = { who, tab, rows, empty };
+    page({ person, address, handle, other, others: others.length }, followers.length, following.length);
   } catch (error) {
     console.error(error);
     main.innerHTML = `<div class="status"><p>Couldn't reach the Follows nodes.</p><button type="button" id="retry">Try again</button></div>`;
     main.querySelector("#retry").onclick = render;
   }
+}
+
+/** Rows for accounts: their Moniker cards, linked to the name they show, else their address. */
+async function accounts(addresses) {
+  return (await moniker.profiles(addresses)).map((p) => ({
+    ...p,
+    link: whoPath(p),
+    detail: `${p.handle && p.name ? `@${p.handle} · ` : ""}${shortAddress(p.address)}`,
+  }));
+}
+
+/**
+ * Rows for what an account follows: an account as its card, and a name as
+ * whoever holds it now, linked to the name.
+ */
+async function targets(followed) {
+  const handles = followed.filter((t) => t.startsWith("@")).map((t) => t.slice(1));
+  const holders = await Promise.all(handles.map((h) => moniker.resolve(h)));
+  const addresses = followed.filter((t) => !t.startsWith("@"));
+  const cards = new Map((await moniker.profiles([...new Set([...holders.filter(Boolean), ...addresses])])).map((p) => [p.address, p]));
+  const holder = new Map(handles.map((h, i) => [h, holders[i] && cards.get(holders[i])]));
+  return followed.map((t) => {
+    if (!t.startsWith("@")) {
+      const p = cards.get(t);
+      return { ...p, link: whoPath(p), detail: `${p.handle && p.name ? `@${p.handle} · ` : ""}${shortAddress(p.address)}` };
+    }
+    const h = t.slice(1);
+    const held = holder.get(h);
+    return {
+      handle: h,
+      ...(held && { address: held.address, name: held.name, avatar: held.avatar }),
+      link: t,
+      detail: held ? `${t} · ${shortAddress(held.address)}` : `${t} · No one holds this name`,
+    };
+  });
 }
 
 function home() {
@@ -72,17 +116,24 @@ function message(text) {
   main.innerHTML = `<p class="status">${esc(text)}</p>`;
 }
 
-function page(person, followers, following) {
-  // The tabs keep how the person was reached: their @handle or their address.
+function page({ person, address, handle, other, others }, followers, following) {
+  // The tabs keep how the page was reached: a @handle or an address.
   const { who, tab } = route();
   const base = `#/${encodeURIComponent(who)}`;
+  const title = person ? (person.name ?? (handle ? `@${handle}` : shortAddress(address))) : `@${handle}`;
+  // The other kind of follow: on a name's page, its holder's account; on an
+  // account's page, the name it shows.
+  const also = other ? ` · <a href="#/${encodeURIComponent(other)}">${count(others, "follower")} of ${other === address ? "the account" : esc(other)}</a>` : "";
+  const detail = address
+    ? `${handle && title !== `@${handle}` ? `@${esc(handle)} · ` : ""}<span class="mono">${esc(shortAddress(address))}</span>
+       · <a href="${esc(moniker.pageURL(address))}" target="_blank" rel="noopener">Moniker page</a>${also}`
+    : "No one holds this name yet.";
   main.innerHTML = `
     <section class="person">
-      ${avatar(person, 72)}
+      ${avatar({ ...person, name: title }, 72)}
       <div>
-        <h1>${esc(label(person))}</h1>
-        <p class="muted">${person.handle && person.name ? `@${esc(person.handle)} · ` : ""}<span class="mono">${esc(shortAddress(person.address))}</span>
-          · <a href="${esc(moniker.pageURL(person.address))}" target="_blank" rel="noopener">Moniker page</a></p>
+        <h1>${esc(title)}</h1>
+        <p class="muted">${detail}</p>
       </div>
     </section>
     <nav class="tabs" aria-label="Lists">
@@ -90,7 +141,7 @@ function page(person, followers, following) {
       <a href="${base}/following" ${tab === "following" ? 'aria-current="page"' : ""}>${count(following, "following", "following")}</a>
     </nav>
     <label class="filter"><span class="sr">Search ${tab}</span>
-      <input id="filter" type="search" placeholder="Search ${tab === "followers" ? "followers" : "people they follow"}" autocomplete="off" value="${esc(filter)}">
+      <input id="filter" type="search" placeholder="Search ${tab === "followers" ? "followers" : "who they follow"}" autocomplete="off" value="${esc(filter)}">
     </label>
     <ul class="people" aria-live="polite"></ul>`;
   const input = main.querySelector("#filter");
@@ -98,25 +149,25 @@ function page(person, followers, following) {
     filter = input.value;
     list();
   };
-  if (followers + following === 0) input.closest("label").hidden = true;
+  if (shown.rows.length === 0) input.closest("label").hidden = true;
   list();
 }
 
 function list() {
   const ul = main.querySelector(".people");
-  const { tab, people } = shown;
-  const kept = people.filter((p) => matches(p, filter));
-  if (people.length === 0) {
-    ul.innerHTML = `<li class="empty muted">${tab === "followers" ? "No followers yet." : "Not following anyone yet."}</li>`;
+  const { rows, empty } = shown;
+  const kept = rows.filter((row) => matches(row, filter));
+  if (rows.length === 0) {
+    ul.innerHTML = `<li class="empty muted">${esc(empty)}</li>`;
   } else if (kept.length === 0) {
     ul.innerHTML = `<li class="empty muted">No one here matches “${esc(filter.trim())}”.</li>`;
   } else {
     ul.innerHTML = kept
       .map(
-        (p) => `<li><a href="#/${encodeURIComponent(whoPath(p))}">
-          ${avatar(p, 40)}
-          <span class="who"><strong>${esc(label(p))}</strong>
-          <span class="muted small">${p.handle && p.name ? `@${esc(p.handle)} · ` : ""}<span class="mono">${esc(shortAddress(p.address))}</span></span></span>
+        (row) => `<li><a href="#/${encodeURIComponent(row.link)}">
+          ${avatar(row, 40)}
+          <span class="who"><strong>${esc(label(row))}</strong>
+          <span class="muted small mono">${esc(row.detail)}</span></span>
         </a></li>`,
       )
       .join("");

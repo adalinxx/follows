@@ -66,16 +66,16 @@ export function client(node) {
   return {
     state,
     submit,
-    /** `who` follows each of `targets`, in one transaction. */
-    follow: async (who, ...targets) => {
+    /** Account `who` follows each of `handles`, in one transaction. */
+    follow: async (who, ...handles) => {
       const s = await state.follows();
       const actions = [];
-      for (const t of targets) actions.push(...(await follows.follow(s, who.address, t.address)).actions);
+      for (const h of handles) actions.push(...(await follows.follow(s, who.address, h)).actions);
       await write(FOLLOWS, who, actions);
     },
-    /** The follow actions for `who` following `target`, unsent. */
-    followActions: async (who, target) => (await follows.follow(await state.follows(), who.address, target.address)).actions,
-    unfollow: async (who, target) => write(FOLLOWS, who, (await follows.unfollow(await state.follows(), who.address, target.address)).actions),
+    /** The actions for `who` following `handle`, unsent. */
+    followActions: async (who, handle) => (await follows.follow(await state.follows(), who.address, handle)).actions,
+    unfollow: async (who, handle) => write(FOLLOWS, who, (await follows.unfollow(await state.follows(), who.address, handle)).actions),
     /** `who`'s Moniker card set to `card`, and `handle` claimed and shown on it, in one transaction. */
     card: async (who, card, handle) => {
       const s = await state.moniker();

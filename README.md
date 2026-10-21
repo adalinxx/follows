@@ -8,27 +8,53 @@ Follows is its own Lattice chain. It holds follows and nothing else.
 
 ## Records
 
-A follow of `<b>` by `<a>` is two keys, so that each end of the graph is one
-prefix read:
+An account follows two kinds of target:
+
+- **An account**, by its address. The follow stays with that account,
+  whatever names it holds or sells.
+- **A name**, a Moniker handle written `@<h>`. The follow is of whoever holds
+  the name now: if the name is sold, given away or moved to a new key, its
+  followers go with it. That suits a business or a brand, whose name is who
+  it is.
+
+A follow of `<t>` by account `<a>` is two keys, so that each end of the graph
+is one prefix read:
 
 | Key | Lists |
 | --- | --- |
-| `user/<a>/follows/<b>` | whom `<a>` follows: read `user/<a>/follows/` |
-| `followers/<b>/<a>` | who follows `<b>`: read `followers/<b>/` |
+| `user/<a>/follows/<t>` | what `<a>` follows: read `user/<a>/follows/` |
+| `followers/<t>/<a>` | who follows `<t>`: read `followers/<t>/` |
 
-`<a>` and `<b>` are account addresses. Only `<a>` writes or deletes them, and
-always both in one transaction, to the same value; clients write `"1"`. The
-chain starts with neither, so the two lists always agree: nobody shows up as a
-follower without following.
+`<a>` is an account address, and only `<a>` writes or deletes its follows,
+always both keys in one transaction, to the same value; clients write `"1"`.
+The chain starts with neither, so the two lists always agree: nobody shows up
+as a follower without following. `<t>` is an address or `@` and a handle
+(lowercase letters, digits and `_`). Who holds a name is Moniker's business:
+following a name nobody holds yet is allowed.
 
-Names and photos for these addresses come from
+The follower is always an account, never a name: only a signature shows who
+followed, and this chain can't see who holds a name on Moniker.
+
+### What following means, for apps
+
+- Following an account shows what that account writes.
+- Following `@h` shows what the current holder of `@h` writes. When `@h`
+  changes hands, followers see the new holder. An app that wants a post tied
+  to a name can let the author say which name it speaks as (say,
+  `as: "h"`) and show it only when the author held the name when posting.
+- An account's audience is its own followers plus the followers of the names
+  it holds. Count each person once when adding them up.
+
+Names and photos for addresses come from
 [Moniker](https://github.com/adalinxx/moniker), the profile chain.
 
 ## The page
 
-`app/` is a static page: search a `@handle` (resolved through Moniker) or an
-address, and see who follows them and whom they follow, each list with a
-filter that matches name, `@handle` or address. Names and photos come from
+`app/` is a static page: search a `@handle` or an address. A name's page
+shows who follows the name and whoever holds it now; an account's page shows
+who follows the account; each links to the other. The Following tab lists the
+names and accounts they follow, a name shown as its current holder. Each list
+has a filter that matches name, `@handle` or address. Names and photos come from
 Moniker through [moniker-sdk](https://github.com/adalinxx/moniker-sdk), a
 submodule at `app/vendor/moniker-sdk` pinned to a release: clone with
 `--recurse-submodules`. Links: `#/@handle`, `#/<address>`, and
@@ -44,14 +70,18 @@ python3 -m http.server 8767   # from the repository root, then open http://127.0
 import { createFollows } from "https://cdn.jsdelivr.net/gh/adalinxx/follows@v0.1.0/src/browser.mjs";
 
 const graph = createFollows();                    // testnet trial by default; or { nodes, chain }
-const people = await graph.following(address);    // whom they follow
-const audience = await graph.followers(address);  // who follows them
-await graph.follows(a, b);                        // true or false
+const followed = await graph.following(address);  // what they follow: ["@ada", "bafyrei…"]
+const fans = await graph.followers("@ada");       // who follows the name
+const fans2 = await graph.followers(address);      // who follows the account
+await graph.follows(address, "@ada");             // true or false
 
 const wallet = window.lattice;                    // Selfhold
-await graph.follow(address, { wallet });          // undefined if already following
+await graph.follow("@ada", { wallet });           // undefined if already following
 await graph.unfollow(address, { wallet });
 ```
+
+A target is an address or a name. A name may be given without its `@`; an
+address is never mistaken for one.
 
 Reads go to the first node that answers. Every trie node is checked against
 its CID, so a read doesn't depend on trusting the node that served it. Writes
