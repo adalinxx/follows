@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { count, label, matches, parseWho, whoPath } from "../app/lib.mjs";
+import { count, label, matches, parseWho } from "../app/lib.mjs";
 
 const address = "bafyreibc6ggvvnkjlyjghue3qxnagcoprbsh725cutnnnkt3t6dambbt6a";
 
@@ -24,12 +24,10 @@ test("a filter matches name, handle or address, ignoring case and @", () => {
   assert.ok(!matches({ address }, "ada"));
 });
 
-test("people are labeled and linked by what they show", () => {
+test("people are labeled by what they show", () => {
   assert.equal(label({ address, name: "Ada", handle: "ada" }), "Ada");
   assert.equal(label({ address, handle: "ada" }), "@ada");
-  assert.equal(label({ address }), "bafyrei…bbt6a");
-  assert.equal(whoPath({ address, handle: "ada" }), "@ada");
-  assert.equal(whoPath({ address }), address);
+  assert.equal(label({ address }), "Unnamed account");
 });
 
 test("counts read naturally", () => {

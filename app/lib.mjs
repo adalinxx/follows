@@ -12,9 +12,6 @@ export function parseWho(text) {
   return HANDLE.test(handle) ? { handle } : null;
 }
 
-/** The hash route for someone: their @handle when they show one, else their address. */
-export const whoPath = (profile) => (profile.handle ? `@${profile.handle}` : profile.address);
-
 /** Whether a filter keeps a profile: its name, @handle or address contains the query. */
 export function matches(profile, query) {
   const q = String(query ?? "").trim().toLowerCase().replace(/^@/, "");
@@ -22,10 +19,8 @@ export function matches(profile, query) {
   return [profile.name, profile.handle, profile.address].some((field) => typeof field === "string" && field.toLowerCase().includes(q));
 }
 
-export const shortAddress = (address) => `${address.slice(0, 7)}…${address.slice(-5)}`;
-
-/** What to call an account: its name, else @handle, else a short address. */
-export const label = (profile) => profile.name ?? (profile.handle ? `@${profile.handle}` : shortAddress(profile.address));
+/** What to call an account: its name, else @handle, else that it has no name. */
+export const label = (profile) => profile.name ?? (profile.handle ? `@${profile.handle}` : "Unnamed account");
 
 /** `1 follower`, `2 followers`, `1,204 following`. */
 export const count = (n, one, many = `${one}s`) => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;

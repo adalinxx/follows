@@ -62,11 +62,20 @@ main.wrap { padding-top: 32px; padding-bottom: 48px; }
 .person { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
 .person > div { min-width: 0; }
 .person h1 { font-size: 26px; overflow-wrap: anywhere; }
-.follow { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-bottom: 24px; }
-.follow follows-button { min-width: 160px; }
-.tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
-.tabs a { padding: 8px 0 10px; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-.tabs a[aria-current="page"] { color: var(--ink); font-weight: 700; border-color: var(--ink); }
+.names { margin: 2px 0 0; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.names a { color: inherit; }
+.links { margin: 6px 0 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 14px; }
+.counts { display: flex; gap: 20px; margin: 0 0 16px; }
+.counts a { color: var(--ink); text-decoration: none; padding: 10px 0; }
+.counts a:hover { text-decoration: underline; }
+.follow { display: flex; }
+follows-button { --follows-accent: var(--accent); --follows-ink: var(--ink); --follows-line: var(--line); --follows-muted: var(--muted); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) follows-button { --follows-accent-ink: #121418; } }
+:root[data-theme="dark"] follows-button { --follows-accent-ink: #121418; }
+.back { display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; }
+.list-title { font-size: 22px; margin: 4px 0 12px; }
+.recent { margin-top: 36px; }
+.recent h2 { font-size: 15px; margin: 0 0 4px; color: var(--muted); }
 .filter { display: flex; margin-bottom: 8px; }
 
 .people { list-style: none; margin: 0; padding: 0; }
@@ -93,7 +102,7 @@ main.wrap { padding-top: 32px; padding-bottom: 48px; }
     <a class="brand" href="#/">Follows</a>
     <form id="find" role="search">
       <label class="sr" for="search">A @handle or an address</label>
-      <input id="search" type="search" placeholder="@handle or address" autocomplete="off" spellcheck="false">
+      <input id="search" type="search" placeholder="Search @handle" autocomplete="off" spellcheck="false">
       <button type="submit">Search</button>
     </form>
   </div>
