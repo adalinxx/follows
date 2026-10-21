@@ -4,30 +4,37 @@
 // graph from createFollows:
 //
 //   defineFollowButton(graph);
-//   <follows-button target="@ada"></follows-button>
+//   <follows-button target="@ada" owner="bafyrei…"></follows-button>
+//   <follows-button target="bafyrei…" label="Ada Lovelace"></follows-button>
 //
-// A follow takes about a block to save: the button says "saving…" until the
-// chain shows it, then says "Saved." and fires `follows:change` ({ target,
-// following }). One still waiting in a node's mempool, sent from this page or
-// anywhere else, shows as saving too. With no wallet it fires
-// `follows:needs-wallet` ({ target }); a page that handles it
-// (preventDefault) shows its own help, else the button says how to get one.
-// It hides itself on the connected account's own page.
+// On a name it reads "Follow @ada", so it says what is followed; on an
+// account, "Follow", with `label` naming the account for screen readers.
+// `owner` (the name's owner) hides it on your own name, as on your account.
+//
+// A follow takes about a block to save: the button shows the new state at
+// once, and its note says it is saving until the chain shows it, then
+// "Saved."; then it fires `follows:change` ({ target, following }). One still
+// waiting in a node's mempool, sent from this page or anywhere else, shows as
+// saving too. With no wallet it fires `follows:needs-wallet` ({ target }); a
+// page that handles it (preventDefault) shows its own help, else the button
+// says how to get one.
 // Style it from outside with --follows-accent, --follows-accent-ink,
-// --follows-ink, --follows-line, --follows-muted and --follows-width.
+// --follows-ink, --follows-line, --follows-muted, --follows-width and
+// --follows-note-align.
 
 const WALLET_URL = "https://chromewebstore.google.com/detail/amcobhbipbblfjonmoiicihhfglkhpce";
-const SAVING = "Saves in about a minute. You can leave this page.";
+const SAVING = "Saving… about a minute. You can leave.";
 const phone = () => /Android|iPhone|iPad|iPod|Mobile/i.test(globalThis.navigator?.userAgent ?? "");
 
 const style = `
-  :host { display: inline-flex; flex-direction: column; align-items: center; gap: 6px; font: inherit; }
+  :host { display: inline-flex; flex-direction: column; gap: 6px; width: var(--follows-width, 14em); max-width: 100%; font: inherit; }
   :host([hidden]) { display: none; }
-  button { box-sizing: border-box; width: var(--follows-width, 12em); max-width: 100%; min-height: 44px; padding: 0 16px;
+  button { box-sizing: border-box; width: 100%; min-height: 44px; padding: 0 16px;
     border-radius: 999px; font: inherit; font-weight: 700; cursor: pointer; white-space: nowrap;
     border: 1px solid transparent; background: var(--follows-accent, #3346D3); color: var(--follows-accent-ink, #fff); }
   button.on { background: transparent; color: var(--follows-ink, inherit); border-color: var(--follows-line, #c9ccd4); }
   button[aria-disabled="true"] { cursor: progress; }
+  .now { display: block; overflow: hidden; text-overflow: ellipsis; }
   button:focus-visible { outline: 2px solid var(--follows-accent, #3346D3); outline-offset: 2px; }
   /* Under a mouse, Following offers what a press does. Drawn, not text: the name stays "Following". */
   @media (hover: hover) {
@@ -35,7 +42,7 @@ const style = `
     button.on.ready:hover::after { content: "Unfollow"; }
     button.on.ready:hover { border-color: currentColor; }
   }
-  .note { max-width: 22em; text-align: center; font-size: 0.85em; line-height: 1.35; color: var(--follows-muted, #5f6470); }
+  .note { text-align: var(--follows-note-align, center); font-size: 0.85em; line-height: 1.35; color: var(--follows-muted, #5f6470); }
   .note a { color: inherit; }
   .note:empty { display: none; }
 `;
@@ -56,7 +63,7 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
   customElements.define(
     tag,
     class extends HTMLElement {
-      static observedAttributes = ["target"];
+      static observedAttributes = ["target", "label", "owner"];
       #drawn = 0;
       #state = "loading"; // loading | follow | following | saving
       #want = true;
@@ -86,16 +93,16 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
       }
       #show(state, note = "") {
         this.#state = state;
-        const name = this.#target;
+        // While saving, the button already shows where it is going; the note says it is saving.
         const on = state === "following" || (state === "saving" && this.#want);
-        const [text, label] =
-          state === "loading" ? ["", `Follow ${name}`]
-          : state === "saving" ? (this.#want ? ["Following · saving…", `Following ${name}, saving`] : ["Unfollowing…", `Unfollowing ${name}`])
-          : on ? ["Following", `Following ${name}`]
-          : ["Follow", `Follow ${name}`];
-        this.#now.textContent = text;
+        const target = this.#target;
+        const shown = target.startsWith("@") ? ` ${target}` : "";
+        const named = target.startsWith("@") ? target : this.getAttribute("label") || "this account";
+        const verb = on ? "Following" : "Follow";
+        this.#now.textContent = state === "loading" ? "" : `${verb}${shown}`;
         this.#button.className = `${on ? "on" : ""} ${state === "following" ? "ready" : ""}`;
-        this.#button.setAttribute("aria-label", label);
+        // The name read out begins with the words shown (WCAG 2.5.3).
+        this.#button.setAttribute("aria-label", `${verb} ${named}`);
         // Never disabled: a disabled button drops keyboard focus.
         this.#button.setAttribute("aria-disabled", String(state === "loading" || state === "saving"));
         this.#button.toggleAttribute("aria-busy", state === "loading");
@@ -114,7 +121,7 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
           const me = await wallet()?.address?.();
           if (ticket !== this.#drawn) return;
           // Nobody follows themselves here.
-          if (me && me === target) {
+          if (me && (me === target || me === this.getAttribute("owner"))) {
             this.hidden = true;
             return;
           }
@@ -126,7 +133,7 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
             await this.#landed(ticket, me, target);
           } else this.#show(following ? "following" : "follow");
         } catch {
-          if (ticket === this.#drawn) this.#show("follow");
+          if (ticket === this.#drawn) this.#show("follow", "Couldn't check whether you follow. Reload to try again.");
         }
       }
       /** Waits until the chain shows the change this button is saving, then says so. */

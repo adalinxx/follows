@@ -60,7 +60,8 @@ before(async () => {
   // Many followers: each fan signs their own follow; sent together, then waited for.
   p.fans = Array.from({ length: FANS }, newAccount);
   // Two fans with names, so a long list can be filtered by name and @handle.
-  await Promise.all([c.card(p.fans[3], { name: "Zoe Quinn" }, "zoe"), c.card(p.fans[4], { name: "Yusuf Ali" })]);
+  // Their filters hold a space or "_", which no address has: no chance matches.
+  await Promise.all([c.card(p.fans[3], { name: "Zoe Quinn" }, "zoe_q"), c.card(p.fans[4], { name: "Yusuf Ali" })]);
   for (const fan of p.fans) await c.submit(FOLLOWS, fan, await c.followActions(fan, "popular"));
   await until("every fan's follow lands", async () => {
     let n = 0;
@@ -120,6 +121,7 @@ const rows = (page) => page.locator(".people li a strong");
 const names = async (page) => (await rows(page).allTextContents()).sort();
 const followButton = (page) => page.locator("follows-button button");
 const note = (page) => page.locator("follows-button .note");
+const SAVING = "Saving… about a minute. You can leave.";
 /** Closes the page, which must not have thrown. */
 async function close(page) {
   assert.deepEqual(page.errors, []);
@@ -144,7 +146,7 @@ test("a @handle opens the name's page: whoever owns it, its counts and Follow", 
   await expect(title(page)).toHaveText("Ada Lovelace");
   await expect(page.locator(".person .names")).toHaveText("@ada");
   await expect(counts(page)).toHaveText(["4 followers", "4 following"]);
-  await expect(followButton(page)).toHaveText("Follow");
+  await expect(followButton(page)).toHaveText("Follow @ada");
   await expect(page.getByRole("link", { name: "Moniker page" })).toHaveAttribute("href", "https://app.moniker.bio/#/%40ada");
   // No raw account IDs on the page, and the search field is clear again.
   await expect(page.locator("main")).not.toContainText("bafyrei");
@@ -188,7 +190,7 @@ test("a search that is not a handle says how to search", async () => {
   const page = await open();
   await page.fill("#search", "ada lovelace");
   await page.press("#search", "Enter");
-  await expect(page.locator("main")).toHaveText("“ada lovelace” isn't a @handle. Try one like @dana.");
+  await expect(page.locator("main")).toHaveText("“ada lovelace” isn't a @handle. Handles look like @name.");
   await close(page);
 });
 
@@ -265,7 +267,7 @@ test("someone with no follows either way sees both empty lists", async () => {
 test("an account with no Moniker card shows as Unnamed account, never as an ID", async () => {
   const page = await open(`#/${p.dan.address}`);
   await expect(title(page)).toHaveText("Unnamed account");
-  await expect(page.locator(".person .avatar")).toHaveText("");
+  await expect(page.locator(".person .avatar")).toHaveText("?");
   await expect(page.locator("main")).not.toContainText("bafyrei");
   await counts(page).nth(1).click();
   await expect(title(page)).toHaveText("This account follows");
@@ -276,7 +278,7 @@ test("an account with no Moniker card shows as Unnamed account, never as an ID",
 test(`a long list (${FANS} followers) gets a filter, by name, @handle or address`, async () => {
   const page = await open("#/@popular/followers");
   await expect(page.locator(".people li")).toHaveCount(FANS, { timeout: 120_000 });
-  for (const [typed, expected] of [["zoe", ["Zoe Quinn"]], ["@ZOE", ["Zoe Quinn"]], ["yusuf", ["Yusuf Ali"]], [p.fans[57].address.slice(-10), ["Unnamed account"]]]) {
+  for (const [typed, expected] of [["zoe quinn", ["Zoe Quinn"]], ["@ZOE_Q", ["Zoe Quinn"]], ["yusuf ali", ["Yusuf Ali"]], [p.fans[57].address.slice(-10), ["Unnamed account"]]]) {
     const started = Date.now();
     await page.fill("#filter", typed);
     await expect(rows(page)).toHaveText(expected);
@@ -399,7 +401,7 @@ test("in dark mode the page is dark, and the Follow button readable", async () =
   const page = await open("#/@ada", { colorScheme: "dark" });
   await expect(title(page)).toHaveText("Ada Lovelace");
   assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgb(18, 20, 24)");
-  await expect(followButton(page)).toHaveText("Follow");
+  await expect(followButton(page)).toHaveText("Follow @ada");
   assert.equal(await followButton(page).evaluate((b) => getComputedStyle(b).color), "rgb(18, 20, 24)");
   await close(page);
 });
@@ -408,25 +410,23 @@ test("in dark mode the page is dark, and the Follow button readable", async () =
 // The wallet is a stand-in that signs with the test's key; Moniker's suite
 // runs the same button with the real Selfhold extension.
 
-test("following a name: the wallet is asked once, it says saving, then Saved, and the count goes up", async () => {
+test("following a name: the wallet is asked once, the button turns at once, the note says saving, then Saved", async () => {
   const fan = newAccount();
   const page = await open("#/@tara", { before: (page) => withWallet(page, fan, { slow: 8000 }) });
   await expect(counts(page).first()).toHaveText("0 followers");
-  await expect(followButton(page)).toHaveText("Follow");
+  await expect(followButton(page)).toHaveText("Follow @tara");
   await expect(followButton(page)).toHaveAccessibleName("Follow @tara");
   const width = (await followButton(page).boundingBox()).width;
   await followButton(page).click();
-  await expect(followButton(page)).toHaveText("Following · saving…");
-  await expect(followButton(page)).toHaveAccessibleName("Following @tara, saving");
-  await expect(note(page)).toHaveText("Saves in about a minute. You can leave this page.");
-  // The button keeps its size through every state.
-  assert.equal((await followButton(page).boundingBox()).width, width);
-  await expect(followButton(page)).toHaveText("Following", { timeout: 120_000 });
-  // "Following" only once the chain holds it.
-  assert.equal(await (await c.state.follows()).get(`user/${fan.address}/follows/@tara`), "1");
-  await expect(note(page)).toHaveText("Saved.");
-  await expect(counts(page).first()).toHaveText("1 follower");
+  await expect(followButton(page)).toHaveText("Following @tara");
   await expect(followButton(page)).toHaveAccessibleName("Following @tara");
+  await expect(note(page)).toHaveText(SAVING);
+  // The button keeps its size, and the note its place, through every state.
+  assert.equal((await followButton(page).boundingBox()).width, width);
+  await expect(note(page)).toHaveText("Saved.", { timeout: 120_000 });
+  // "Saved." only once the chain holds it.
+  assert.equal(await (await c.state.follows()).get(`user/${fan.address}/follows/@tara`), "1");
+  await expect(counts(page).first()).toHaveText("1 follower");
   assert.equal(await followButton(page).getAttribute("aria-pressed"), null);
   assert.equal(page.requests.length, 1);
   assert.deepEqual(page.requests[0].actions.map((a) => a.key).sort(), [`followers/@tara/${fan.address}`, `user/${fan.address}/follows/@tara`]);
@@ -434,11 +434,14 @@ test("following a name: the wallet is asked once, it says saving, then Saved, an
   await close(page);
 });
 
-test("following an account from its page follows the account, not its name", async () => {
+test("following an account from its page follows the account, not its name, and names it to screen readers", async () => {
   const fan = newAccount();
   const page = await open(`#/${p.tara.address}`, { before: (page) => withWallet(page, fan) });
+  await expect(followButton(page)).toHaveText("Follow");
+  await expect(followButton(page)).toHaveAccessibleName("Follow Tara Get");
   await followButton(page).click();
-  await expect(followButton(page)).toHaveText("Following", { timeout: 120_000 });
+  await expect(note(page)).toHaveText("Saved.", { timeout: 120_000 });
+  await expect(followButton(page)).toHaveText("Following");
   await expect(counts(page).first()).toHaveText("1 follower");
   assert.deepEqual(page.requests[0].actions.map((a) => a.key).sort(), [`followers/${p.tara.address}/${fan.address}`, `user/${fan.address}/follows/${p.tara.address}`]);
   await close(page);
@@ -448,14 +451,15 @@ test("Following shows Unfollow under a mouse, and pressing it unfollows", async 
   const fan = newAccount();
   await c.follow(fan, "tara");
   const page = await open("#/@tara", { before: (page) => withWallet(page, fan, { connected: true }) });
-  await expect(followButton(page)).toHaveText("Following");
+  await expect(followButton(page)).toHaveText("Following @tara");
   await followButton(page).hover();
   await expect(followButton(page).locator(".now")).toBeHidden();
   assert.equal(await followButton(page).evaluate((b) => getComputedStyle(b, "::after").content), '"Unfollow"');
   const before = await counts(page).first().textContent();
   await followButton(page).click();
-  await expect(followButton(page)).toHaveText("Unfollowing…");
-  await expect(followButton(page)).toHaveText("Follow", { timeout: 120_000 });
+  await expect(followButton(page)).toHaveText("Follow @tara");
+  await expect(note(page)).toHaveText(SAVING);
+  await expect(note(page)).toHaveText("Saved.", { timeout: 120_000 });
   await expect(counts(page).first()).not.toHaveText(before);
   assert.deepEqual(page.requests[0].actions.map((a) => a.newValue), [undefined, undefined]);
   await close(page);
@@ -463,12 +467,12 @@ test("Following shows Unfollow under a mouse, and pressing it unfollows", async 
 
 test("keyboard focus stays on the button while it saves", async () => {
   const page = await open("#/@tara", { before: (page) => withWallet(page, newAccount()) });
-  await expect(followButton(page)).toHaveText("Follow");
+  await expect(followButton(page)).toHaveText("Follow @tara");
   await followButton(page).focus();
   await page.keyboard.press("Enter");
-  await expect(followButton(page)).toHaveText("Following · saving…");
+  await expect(note(page)).toHaveText(SAVING);
   await expect(followButton(page)).toBeFocused();
-  await expect(followButton(page)).toHaveText("Following", { timeout: 120_000 });
+  await expect(note(page)).toHaveText("Saved.", { timeout: 120_000 });
   await expect(followButton(page)).toBeFocused();
   await close(page);
 });
@@ -477,7 +481,7 @@ test("declining in the wallet sends nothing and says so", async () => {
   const page = await open("#/@tara", { before: (page) => withWallet(page, newAccount(), { decline: true }) });
   await followButton(page).click();
   await expect(note(page)).toHaveText("Canceled in Selfhold. Nothing was sent.");
-  await expect(followButton(page)).toHaveText("Follow");
+  await expect(followButton(page)).toHaveText("Follow @tara");
   await close(page);
 });
 
@@ -496,11 +500,13 @@ test("without a wallet, Follow says how to get one; on a phone, to use a compute
   await close(page);
 });
 
-test("on your own account's page there is no Follow button", async () => {
-  const page = await open(`#/${p.tara.address}`, { before: (page) => withWallet(page, p.tara, { connected: true }) });
-  await expect(counts(page).first()).toHaveText(/follower/);
-  await expect(page.locator("follows-button")).toBeHidden();
-  await close(page);
+test("on your own account's page, or your own name's, there is no Follow button", async () => {
+  for (const hash of [`#/${p.tara.address}`, "#/@tara"]) {
+    const page = await open(hash, { before: (page) => withWallet(page, p.tara, { connected: true }) });
+    await expect(counts(page).first()).toHaveText(/follower/);
+    await expect(page.locator("follows-button")).toBeHidden();
+    await close(page);
+  }
 });
 
 test("a follow still waiting for a block, sent from anywhere, shows as saving until it lands", async () => {
@@ -511,10 +517,10 @@ test("a follow still waiting for a block, sent from anywhere, shows as saving un
     // Sent by another app: this page never asked the wallet for it.
     await c.submit(FOLLOWS, fan, await c.followActions(fan, "tara"));
     const page = await open("#/@tara", { before: (page) => withWallet(page, fan, { connected: true }) });
-    await expect(followButton(page)).toHaveText("Following · saving…");
-    await expect(note(page)).toHaveText("Saves in about a minute. You can leave this page.");
+    await expect(followButton(page)).toHaveText("Following @tara");
+    await expect(note(page)).toHaveText(SAVING);
     mining("start");
-    await expect(followButton(page)).toHaveText("Following", { timeout: 120_000 });
+    await expect(note(page)).toHaveText("Saved.", { timeout: 120_000 });
     assert.equal(page.requests.length, 0);
     await close(page);
   } finally {

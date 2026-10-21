@@ -91,7 +91,7 @@ async function render() {
   search.value = "";
   if (who === "") return home();
   const parsed = parseWho(who);
-  if (!parsed) return message(`“${who}” isn't a @handle. Try one like @dana.`);
+  if (!parsed) return message(`“${who}” isn't a @handle. Handles look like @name.`);
   if (shown?.who !== who || shown?.list !== list) filter = "";
   main.innerHTML = `<p class="status muted">Loading…</p>`;
   try {
@@ -136,9 +136,10 @@ async function counts({ followed, address }) {
   return { followers: followers.length, following: following.length };
 }
 
+const many = (n, one, other) => `<strong>${n.toLocaleString("en-US")}</strong> ${n === 1 ? one : other}`;
 const countLinks = (who, n, owned) => `
-  <a href="${esc(link(who))}/followers">${count(n.followers, "follower")}</a>
-  ${owned ? `<a href="${esc(link(who))}/following">${count(n.following, "following", "following")}</a>` : ""}`;
+  <a href="${esc(link(who))}/followers">${many(n.followers, "follower", "followers")}</a>
+  ${owned ? `<a href="${esc(link(who))}/following">${many(n.following, "following", "following")}</a>` : ""}`;
 
 async function profilePage(who, found) {
   const { followed, handle, address, person } = found;
@@ -164,7 +165,7 @@ async function profilePage(who, found) {
       </div>
     </section>
     <p class="counts" data-followed="${esc(followed)}">${countLinks(who, n, Boolean(address))}</p>
-    <div class="follow"><follows-button target="${esc(followed)}"></follows-button></div>`;
+    <div class="follow"><follows-button target="${esc(followed)}" label="${esc(title)}" ${handle && address ? `owner="${esc(address)}"` : ""}></follows-button></div>`;
   photos();
 }
 
@@ -226,9 +227,9 @@ function draw() {
   photos();
 }
 
-/** An avatar: the Moniker photo once it loads, the first letter until then, blank with no name. */
+/** An avatar: the Moniker photo once it loads, the first letter until then, "?" with no name. */
 function avatar(profile, size) {
-  const letter = profile.name || profile.handle ? label(profile).replace(/^@/, "").charAt(0).toUpperCase() : "";
+  const letter = profile.name || profile.handle ? label(profile).replace(/^@/, "").charAt(0).toUpperCase() : "?";
   return `<span class="avatar" style="--size:${size}px" ${profile.avatar ? `data-cid="${esc(profile.avatar)}"` : ""} aria-hidden="true">${esc(letter)}</span>`;
 }
 
@@ -264,7 +265,7 @@ document.querySelector("#find").onsubmit = (event) => {
   event.preventDefault();
   const typed = search.value.trim();
   const who = parseWho(typed);
-  if (!who) return message(`“${typed}” isn't a @handle. Try one like @dana.`);
+  if (!who) return message(`“${typed}” isn't a @handle. Handles look like @name.`);
   location.hash = link(who.address ?? `@${who.handle}`);
 };
 addEventListener("hashchange", render);
