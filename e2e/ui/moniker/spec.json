@@ -9,7 +9,7 @@
   "halfLife": 100,
   "wasmPolicies": [
     {
-      "moduleCID": "bafyreihbwjt5uuw2se5rcc4hdmbooo7wcixzsfg6geddutb6rgmbzaenxe",
+      "moduleCID": "bafyreidbabni55wvwzcq27sx6jjiirtlxrqqlzvxz4ujebjidd5tztp2li",
       "abiVersion": 1,
       "scope": "transaction",
       "entrypoint": "lattice_validate_transaction"

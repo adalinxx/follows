@@ -76,18 +76,15 @@ export function client(node) {
     /** The actions for `who` following `handle`, unsent. */
     followActions: async (who, handle) => (await follows.follow(await state.follows(), who.address, handle)).actions,
     unfollow: async (who, handle) => write(FOLLOWS, who, (await follows.unfollow(await state.follows(), who.address, handle)).actions),
-    /** `who`'s Moniker card set to `card`, and `handle` claimed and shown on it, in one transaction. */
+    /** `who` claims `handle` on Moniker, with `card` for it, in one transaction. */
     card: async (who, card, handle) => {
-      const s = await state.moniker();
-      // A handle bought in Moniker's app goes on the card too.
-      const edit = await profile.editCard(s, who.address, handle ? { ...card, handle } : card);
-      const claim = handle ? await profile.claim(s, who.address, handle) : { actions: [] };
-      await write(MONIKER, who, [...edit.actions, ...claim.actions]);
+      const claim = await profile.claim(await state.moniker(), who.address, handle);
+      await write(MONIKER, who, [...claim.actions, { key: profile.cardKey(who.address, handle), newValue: JSON.stringify(card) }]);
     },
     /** `from` gives `handle` to `to`. */
     give: async (from, handle, to) => {
-      const entry = await profile.resolve(await state.moniker(), handle);
-      await write(MONIKER, from, profile.transfer(entry, to.address).actions);
+      const s = await state.moniker();
+      await write(MONIKER, from, (await profile.transfer(s, await profile.resolve(s, handle), to.address)).actions);
     },
   };
 }

@@ -52,16 +52,15 @@ function route() {
 // ---------------------------------------------------------------- reading
 
 /**
- * Whom `who` names: for a name, the name and whoever owns it now; for an
- * account, the account and the names it owns.
+ * Whom `who` names: for a name, the name, whoever owns it now and its card;
+ * for an account, the account. The card belongs to the name, not the account.
  */
 async function lookUp(parsed) {
   if (parsed.handle) {
-    const address = await moniker.resolve(parsed.handle);
-    return { followed: `@${parsed.handle}`, handle: parsed.handle, address, person: address && (await moniker.profile(address)) };
+    const card = await moniker.card(parsed.handle);
+    return { followed: `@${parsed.handle}`, handle: parsed.handle, address: card?.address, person: card };
   }
-  const person = await moniker.profile(parsed.address);
-  return { followed: parsed.address, address: parsed.address, person };
+  return { followed: parsed.address, address: parsed.address };
 }
 
 /** Rows for accounts: their Moniker cards. */
@@ -69,16 +68,15 @@ async function accountRows(addresses, { marked = false } = {}) {
   return (await moniker.profiles(addresses)).map((p) => ({
     ...p,
     href: link(p.handle ? `@${p.handle}` : p.address),
-    detail: [p.handle && `@${p.handle}`, marked && (p.handle ? "account" : "Account")].filter(Boolean).join(" · "),
+    detail: marked ? (p.handle ? `@${p.handle}'s account` : "") : p.handle ? `@${p.handle}` : "",
   }));
 }
 
 /** Rows for what an account follows: names, as whoever owns them now, and accounts, marked as such. */
 async function followedRows(targets) {
   const names = targets.filter((t) => t.startsWith("@"));
-  const owners = await Promise.all(names.map((t) => moniker.resolve(t.slice(1))));
-  const cards = new Map((await moniker.profiles(owners.filter(Boolean))).map((p) => [p.address, p]));
-  const owner = new Map(names.map((t, i) => [t, owners[i] && cards.get(owners[i])]));
+  const cards = await Promise.all(names.map((t) => moniker.card(t)));
+  const owner = new Map(names.map((t, i) => [t, cards[i]]));
   const accounts = new Map((await accountRows(targets.filter((t) => !t.startsWith("@")), { marked: true })).map((row) => [row.address, row]));
   return targets.map((t) => {
     if (!t.startsWith("@")) return accounts.get(t);
@@ -94,6 +92,8 @@ async function followedRows(targets) {
 
 // ---------------------------------------------------------------- views
 
+let pages = 0; // pages shown so far
+
 async function render() {
   const { who, list } = route();
   search.value = "";
@@ -106,6 +106,12 @@ async function render() {
     const found = await lookUp(parsed);
     if (list) await listPage(who, list, found);
     else await profilePage(who, found);
+    // A new page: focus its heading, so keyboard and screen reader users start there.
+    if (pages++ > 0 && route().who === who && !main.contains(document.activeElement)) {
+      const heading = main.querySelector("h1");
+      heading?.setAttribute("tabindex", "-1");
+      heading?.focus({ preventScroll: true });
+    }
   } catch (error) {
     console.error(error);
     main.innerHTML = `<div class="status"><p>Couldn't reach Follows.</p><button type="button" id="retry">Try again</button></div>`;
@@ -136,7 +142,7 @@ function message(text) {
 /** What a page is called, and how its lists are titled. */
 function naming({ handle, person, address }) {
   if (handle) return { title: person?.name ?? `@${handle}`, short: `@${handle}` };
-  return { title: label(person ?? { address }), short: person?.name ?? "This account" };
+  return { title: `Account ${shortID(address)}`, short: `Account ${shortID(address)}` };
 }
 
 async function counts({ followed, address }) {
@@ -151,40 +157,52 @@ const countLinks = (who, n, owned) => `
 
 async function profilePage(who, found) {
   const { followed, handle, address, person } = found;
-  const [n, owns] = await Promise.all([counts(found), handle ? [] : namesOwned(address)]);
+  const [n, owns, by] = await Promise.all([
+    counts(found),
+    handle ? [] : namesOwned(address).then((held) => Promise.all(held.map(async (h) => (await moniker.card(h)) ?? { handle: h }))),
+    handle ? undefined : moniker.who(address).then((p) => p.handle),
+  ]);
+  // The default first: it is the one apps show.
+  owns.sort((a, b) => (b.handle === by) - (a.handle === by));
   if (route().who !== who || route().list) return; // moved on meanwhile
   shown = { who, list: "" };
   const { title } = naming(found);
   remember(who, title, handle ? `@${handle}` : "Account");
-  // A name's page says which account owns it; an account's page shows its ID
-  // and labels its names, so the two never look alike.
-  const sub = handle
-    ? address ? `@${esc(handle)}` : `@${esc(handle)} · No one owns this name yet`
-    : `Account <span class="id" title="${esc(address)}">${esc(shortID(address))}</span><button type="button" class="copy" data-copy="${esc(address)}" aria-label="Copy account ID">Copy</button>`;
-  const names = !handle && owns.length
-    ? `<p class="names"><span class="muted">${owns.length === 1 ? "Name" : "Names"}</span>${owns.map((h) => `<a href="${esc(link(`@${h}`))}">@${esc(h)}</a>`).join("")}</p>`
-    : "";
+  // A name's page is its card, and says which account owns it. An account's
+  // page is the account: its ID, and the names it owns, each with its card.
   const links = [
     handle && address && `<a href="${esc(link(address))}">Owned by <span class="id">${esc(shortID(address))}</span></a>`,
     address && `<a href="${esc(moniker.pageURL(followed))}" target="_blank" rel="noopener">Moniker page</a>`,
   ].filter(Boolean).join("");
-  main.innerHTML = `
-    <section class="person">
-      ${avatar(person ?? { handle }, 72)}
+  const head = handle
+    ? `${avatar(person ?? { handle }, 72)}
       <div>
         <h1>${esc(title)}</h1>
-        <p class="muted ${handle ? "names" : "account"}">${sub}</p>
-        ${names}
+        <p class="muted names">${address ? `@${esc(handle)}` : `@${esc(handle)} · No one owns this name yet`}</p>
+        ${person?.description ? `<p class="bio">${esc(person.description)}</p>` : ""}
         ${links ? `<p class="links">${links}</p>` : ""}
-      </div>
-    </section>
+      </div>`
+    : `<div>
+        <h1>Account <span class="id" title="${esc(address)}">${esc(shortID(address))}</span></h1>
+        <p class="links"><button type="button" class="copy" data-copy="${esc(address)}">Copy ID</button>${links}</p>
+        <p class="sr" role="status" id="copied"></p>
+      </div>`;
+  const names = handle ? "" : `
+    <h2 class="section">${owns.length === 1 ? "Name" : "Names"}</h2>
+    <ul class="people owned">${owns.length
+      ? owns.map((card) => `<li><a href="${esc(link(`@${card.handle}`))}">${avatar(card, 40)}<span class="who"><strong>${esc(label(card))}</strong>${card.name || (owns.length > 1 && card.handle === by) ? `<span class="muted small">${[card.name && `@${esc(card.handle)}`, owns.length > 1 && card.handle === by && "default"].filter(Boolean).join(" · ")}</span>` : ""}</span></a></li>`).join("")
+      : `<li class="empty muted">No names.</li>`}</ul>`;
+  main.innerHTML = `
+    <section class="person">${head}</section>
     <p class="counts" data-followed="${esc(followed)}">${countLinks(who, n, Boolean(address))}</p>
-    <div class="follow"><follows-button target="${esc(followed)}" label="${esc(title)}" ${handle && address ? `owner="${esc(address)}"` : ""}></follows-button></div>`;
+    <div class="follow"><follows-button target="${esc(followed)}" label="${esc(handle ? title : shortID(address))}" ${handle && address ? `owner="${esc(address)}"` : ""}></follows-button></div>
+    ${names}`;
   const copy = main.querySelector(".copy");
   if (copy) {
     copy.onclick = () => navigator.clipboard?.writeText(copy.dataset.copy).then(() => {
       copy.textContent = "Copied";
-      setTimeout(() => (copy.textContent = "Copy"), 2000);
+      main.querySelector("#copied").textContent = "Account ID copied";
+      setTimeout(() => (copy.textContent = "Copy ID"), 2000);
     });
   }
   photos();
@@ -274,7 +292,7 @@ function draw() {
 
 /** An avatar: the Moniker photo once it loads, the first letter until then, "?" with no name. */
 function avatar(profile, size) {
-  const letter = profile.name || profile.handle ? label(profile).replace(/^@/, "").charAt(0).toUpperCase() : "?";
+  const letter = profile.name || profile.handle ? label(profile).replace(/^@/, "").charAt(0).toUpperCase() : "";
   return `<span class="avatar" style="--size:${size}px" ${profile.avatar ? `data-cid="${esc(profile.avatar)}"` : ""} aria-hidden="true">${esc(letter)}</span>`;
 }
 

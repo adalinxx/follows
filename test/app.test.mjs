@@ -27,7 +27,7 @@ test("a filter matches name, handle or address, ignoring case and @", () => {
 test("people are labeled by what they show", () => {
   assert.equal(label({ address, name: "Ada", handle: "ada" }), "Ada");
   assert.equal(label({ address, handle: "ada" }), "@ada");
-  assert.equal(label({ address }), "Unnamed account");
+  assert.equal(label({ address }), "Account …dambbt6a");
 });
 
 test("counts read naturally", () => {

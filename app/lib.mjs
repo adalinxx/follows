@@ -19,8 +19,8 @@ export function matches(profile, query) {
   return [profile.name, profile.handle, profile.address].some((field) => typeof field === "string" && field.toLowerCase().includes(q));
 }
 
-/** What to call an account: its name, else @handle, else that it has no name. */
-export const label = (profile) => profile.name ?? (profile.handle ? `@${profile.handle}` : "Unnamed account");
+/** What to call an account: its name, else @handle, else the end of its ID. */
+export const label = (profile) => profile.name ?? (profile.handle ? `@${profile.handle}` : `Account ${shortID(profile.address)}`);
 
 /** `1 follower`, `2 followers`, `1,204 following`. */
 export const count = (n, one, many = `${one}s`) => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
@@ -29,4 +29,6 @@ export const count = (n, one, many = `${one}s`) => `${n.toLocaleString("en-US")}
  * An account's ID, short enough to read and compare: its end, since every
  * address begins alike (`bafyrei…`).
  */
-export const shortID = (address) => `…${address.slice(-8)}`;
+export function shortID(address) {
+  return `…${address.slice(-8)}`;
+}

@@ -36,13 +36,13 @@ before(async () => {
   await Promise.all([
     c.card(p.ada, { name: "Ada Lovelace", avatar: png }, "ada"),
     c.card(p.bob, { name: "Bob Stone" }, "bob"),
-    c.card(p.cara, { name: "Cara Diaz" }),
+    c.card(p.cara, { name: "Cara Diaz" }, "cara"),
     c.card(p.eve, { name: HOSTILE, avatar: svg }, "eve"),
     c.card(p.solo, { name: "Solo" }, "solo"),
     c.card(p.one, { name: "Only One" }, "one"),
     c.card(p.narc, { name: "Narcissus" }, "narc"),
     c.card(p.swapA, { name: "First Holder" }, "swap"),
-    c.card(p.swapB, { name: "Second Holder" }),
+    c.card(p.swapB, { name: "Second Holder" }, "second"),
     c.card(p.popular, { name: "Popular" }, "popular"),
     c.card(p.tara, { name: "Tara Get" }, "tara"),
   ]);
@@ -61,7 +61,7 @@ before(async () => {
   p.fans = Array.from({ length: FANS }, newAccount);
   // Two fans with names, so a long list can be filtered by name and @handle.
   // Their filters hold a space or "_", which no address has: no chance matches.
-  await Promise.all([c.card(p.fans[3], { name: "Zoe Quinn" }, "zoe_q"), c.card(p.fans[4], { name: "Yusuf Ali" })]);
+  await Promise.all([c.card(p.fans[3], { name: "Zoe Quinn" }, "zoe_q"), c.card(p.fans[4], { name: "Yusuf Ali" }, "yusuf")]);
   for (const fan of p.fans) await c.submit(FOLLOWS, fan, await c.followActions(fan, "popular"));
   await until("every fan's follow lands", async () => {
     let n = 0;
@@ -166,21 +166,23 @@ test("a handle may be typed without @ and in capitals", async () => {
   }
 });
 
-test("the owner's page is the account: its ID, every name it owns, and its own followers", async () => {
+test("the owner's page is the account: its ID, every name it owns with its card, and its own followers", async () => {
   const page = await open("#/@ada");
   await page.getByRole("link", { name: /^Owned by / }).click();
   assert.ok(page.url().endsWith(`#/${p.ada.address}`), page.url());
-  await expect(title(page)).toHaveText("Ada Lovelace");
-  // Not the name's page: it says it is an account, with the ID the name page showed, and labels its names.
-  await expect(page.locator(".person .account")).toHaveText(`Account …${p.ada.address.slice(-8)}Copy`);
-  await expect(page.locator(".person .names")).toHaveText("Name@ada");
-  await expect(page.locator(".person .names a")).toHaveText(["@ada"]);
+  // Not the name's page: the account, by the ID the name page showed, with no photo or name of its own.
+  await expect(title(page)).toHaveText(`Account …${p.ada.address.slice(-8)}`);
+  await expect(page.locator(".person .avatar")).toHaveCount(0);
+  await expect(page.locator("h2.section")).toHaveText("Name");
+  await expect(page.locator(".owned li strong")).toHaveText(["Ada Lovelace"]);
+  await expect(page.locator(".owned li .small")).toHaveText(["@ada"]);
   await expect(followButton(page)).toHaveText("Follow account");
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.getByRole("button", { name: "Copy account ID" }).click();
+  await page.getByRole("button", { name: "Copy ID" }).click();
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), p.ada.address);
   await expect(counts(page)).toHaveText(["1 follower", "4 following"]);
-  await page.getByRole("link", { name: "@ada", exact: true }).click();
+  await page.getByRole("link", { name: /Ada Lovelace/ }).click();
+  await expect(title(page)).toHaveText("Ada Lovelace");
   await expect(counts(page).first()).toHaveText("4 followers");
   await close(page);
 });
@@ -189,7 +191,8 @@ test("a pasted account address opens that account", async () => {
   const page = await open();
   await page.fill("#search", p.bob.address);
   await page.press("#search", "Enter");
-  await expect(title(page)).toHaveText("Bob Stone");
+  await expect(title(page)).toHaveText(`Account …${p.bob.address.slice(-8)}`);
+  await expect(page.locator(".owned li strong")).toHaveText(["Bob Stone"]);
   await expect(counts(page)).toHaveText(["0 followers", "2 following"]);
   await close(page);
 });
@@ -235,7 +238,7 @@ test("the followers count opens the list of people, each linking to their page",
   await counts(page).first().click();
   assert.match(page.url(), /#\/%40ada\/followers$/);
   await expect(title(page)).toHaveText("@ada's followers");
-  assert.deepEqual(await (async () => (await expect(rows(page)).toHaveCount(4), names(page)))(), ["Bob Stone", "Cara Diaz", HOSTILE, "Unnamed account"].sort());
+  assert.deepEqual(await (async () => (await expect(rows(page)).toHaveCount(4), names(page)))(), ["Bob Stone", "Cara Diaz", HOSTILE, `Account …${p.dan.address.slice(-8)}`].sort());
   // A short list needs no filter.
   await expect(page.locator("#filter")).toHaveCount(0);
   await page.getByRole("link", { name: /Bob Stone/ }).click();
@@ -255,7 +258,7 @@ test("the following count lists names, as whoever owns them now, and accounts, m
   await expect(row("Bob Stone")).toContainText("@bob");
   await expect(row("Bob Stone")).not.toContainText("account");
   await expect(row("@ghost")).toContainText("No one owns it yet");
-  await expect(row("Cara Diaz")).toContainText("Account");
+  await expect(row("Cara Diaz")).toContainText("@cara's account");
   await row("@ghost").click();
   await expect(title(page)).toHaveText("@ghost");
   await close(page);
@@ -272,13 +275,14 @@ test("someone with no follows either way sees both empty lists", async () => {
   await close(page);
 });
 
-test("an account with no Moniker card shows as Unnamed account, with only the end of its ID", async () => {
+test("an account with no name shows as the end of its ID, never the whole address", async () => {
+  const id = `Account …${p.dan.address.slice(-8)}`;
   const page = await open(`#/${p.dan.address}`);
-  await expect(title(page)).toHaveText("Unnamed account");
-  await expect(page.locator(".person .avatar")).toHaveText("?");
+  await expect(title(page)).toHaveText(id);
+  await expect(page.locator(".owned")).toHaveText("No names.");
   await expect(page.locator("main")).not.toContainText("bafyrei");
   await counts(page).nth(1).click();
-  await expect(title(page)).toHaveText("This account follows");
+  await expect(title(page)).toHaveText(`${id} follows`);
   assert.deepEqual(await (async () => (await expect(rows(page)).toHaveCount(2), names(page)))(), ["Ada Lovelace", "First Holder"]);
   await close(page);
 });
@@ -292,7 +296,7 @@ test(`a long list (${FANS} followers) shows 50 at a time, and its filter looks t
   await page.fill("#filter", "zoe quinn");
   await expect(rows(page)).toHaveText(["Zoe Quinn"], { timeout: 60_000 });
   await expect(page.getByRole("button", { name: /^Show \d+ more$/ })).toBeHidden();
-  for (const [typed, expected] of [["@ZOE_Q", ["Zoe Quinn"]], ["yusuf ali", ["Yusuf Ali"]], [p.fans[57].address.slice(-10), ["Unnamed account"]]]) {
+  for (const [typed, expected] of [["@ZOE_Q", ["Zoe Quinn"]], ["yusuf ali", ["Yusuf Ali"]], [p.fans[57].address.slice(-10), [`Account …${p.fans[57].address.slice(-8)}`]]]) {
     const started = Date.now();
     await page.fill("#filter", typed);
     await expect(rows(page)).toHaveText(expected);
@@ -338,14 +342,16 @@ test("someone who follows themself is on their own list", async () => {
   await close(page);
 });
 
-test("a name that changes hands keeps its followers, and shows its new owner", async () => {
+test("a name that changes hands keeps its followers, and starts with its new owner's empty card", async () => {
   let page = await open("#/@swap");
   await expect(title(page)).toHaveText("First Holder");
   await expect(counts(page)).toHaveText(["2 followers", "1 following"]);
   await close(page);
   await c.give(p.swapA, "swap", p.swapB);
   page = await open("#/@swap");
-  await expect(title(page)).toHaveText("Second Holder");
+  // First Holder's card for it went with First Holder.
+  await expect(title(page)).toHaveText("@swap");
+  await expect(page.getByRole("link", { name: `Owned by …${p.swapB.address.slice(-8)}` })).toBeVisible();
   await expect(counts(page)).toHaveText(["2 followers", "1 following"]);
   // Whom the name follows is whom its owner follows.
   await counts(page).nth(1).click();
@@ -375,9 +381,10 @@ test("moving on before a page loads shows the newer one, not the slower one", as
   await page.evaluate((bob) => (location.hash = `#/${bob}`), p.bob.address);
   hold = false;
   for (const route of held.splice(0)) await route.continue();
-  await expect(title(page)).toHaveText("Bob Stone");
+  const bob = `Account …${p.bob.address.slice(-8)}`;
+  await expect(title(page)).toHaveText(bob);
   await page.waitForTimeout(3000);
-  await expect(title(page)).toHaveText("Bob Stone");
+  await expect(title(page)).toHaveText(bob);
   await close(page);
 });
 
@@ -454,7 +461,7 @@ test("following an account from its page follows the account, not its name, and 
   const fan = newAccount();
   const page = await open(`#/${p.tara.address}`, { before: (page) => withWallet(page, fan) });
   await expect(followButton(page)).toHaveText("Follow account");
-  await expect(followButton(page)).toHaveAccessibleName("Follow account, Tara Get");
+  await expect(followButton(page)).toHaveAccessibleName(`Follow account, …${p.tara.address.slice(-8)}`);
   await followButton(page).click();
   await expect(note(page)).toHaveText("Saved.", { timeout: 120_000 });
   await expect(followButton(page)).toHaveText("Following account");
