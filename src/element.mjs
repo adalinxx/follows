@@ -249,7 +249,7 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
           if (!this.#as) {
             // On Moniker itself, the link stays on the page.
             this.#show(before, monikerURL.startsWith("#")
-              ? `To follow, <a href="${escape(monikerURL)}">get a name</a> first. It makes your profile.`
+              ? `To follow, <a href="${escape(monikerURL)}">make a profile</a> first.`
               : `To follow, make a profile on <a href="${escape(monikerURL)}" target="_blank" rel="noopener">Moniker</a>, then reload this page.`);
             return;
           }
