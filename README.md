@@ -52,8 +52,8 @@ python3 -m http.server 8767   # from the repository root, then open http://127.0
 ## Use Follows in your app
 
 ```js
-import { createFollows } from "https://cdn.jsdelivr.net/gh/adalinxx/follows@v0.2.0/src/browser.mjs";
-import { createMoniker } from "https://cdn.jsdelivr.net/gh/adalinxx/moniker-sdk@<release>/src/browser.mjs";
+import { createFollows } from "https://cdn.jsdelivr.net/gh/adalinxx/follows@v0.3.0/src/browser.mjs";
+import { createMoniker } from "https://cdn.jsdelivr.net/gh/adalinxx/moniker-sdk@v0.2.0/src/browser.mjs";
 
 const moniker = createMoniker();
 const graph = createFollows({ moniker });          // testnet trial by default; or { nodes, chain }
@@ -70,7 +70,7 @@ await graph.unfollow(p, t, { wallet });            // deletes this account's key
 A Follow button for any page, which asks Selfhold only when pressed:
 
 ```js
-import { createFollows, defineFollowButton } from "https://cdn.jsdelivr.net/gh/adalinxx/follows@v0.2.0/src/browser.mjs";
+import { createFollows, defineFollowButton } from "https://cdn.jsdelivr.net/gh/adalinxx/follows@v0.3.0/src/browser.mjs";
 
 defineFollowButton(createFollows({ moniker }));
 ```
