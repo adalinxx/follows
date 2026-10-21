@@ -13,8 +13,9 @@
 //! deletes its own keys. `<p>` and `<t>` are profile ids, 16 characters of
 //! `a`–`z` and `2`–`7`. This chain can't see Moniker, so it can't check that
 //! `<a>` acts for `<p>`: readers count a follow only while it does. A
-//! transaction that writes one key writes its twin to the same new value, or
-//! deletes both. The chain starts with neither, so the two always agree.
+//! transaction that writes `follows/` writes its `followers/` twin directly
+//! after, to the same new value, or deletes both. The chain starts with
+//! neither, so the two always agree, and the policy reads each pair once.
 //! Values mean nothing else to the chain.
 //!
 //! Coin actions pass untouched.
@@ -24,9 +25,10 @@ use lattice_policy_rules::{is_address, transaction_body, Body};
 
 lattice_policy_rules::lattice_policy_abi!(crate::validate);
 
-/// The verdict for one policy context. Anything malformed is a rejection.
-pub fn validate(context: &[u8]) -> bool {
-    transaction_body(context).and_then(check_body).is_some()
+/// The verdict for one policy context, with `scratch` for the signer tree.
+/// Anything malformed is a rejection.
+pub fn validate(context: &[u8], scratch: &mut [u32]) -> bool {
+    transaction_body(context).and_then(|body| check_body(body, scratch)).is_some()
 }
 
 /// A follow key read: which profile follows which, written by which account,
@@ -39,26 +41,20 @@ struct Follow<'a> {
     by_follower: bool,
 }
 
-fn check_body(bytes: &[u8]) -> Option<()> {
+fn check_body(bytes: &[u8], scratch: &mut [u32]) -> Option<()> {
     let body = Body::parse(bytes)?;
-    for action in body.actions()? {
+    let signers = body.signers(scratch)?;
+    let mut actions = body.actions()?;
+    while let Some(action) = actions.next() {
         let action = action?;
         let follow = parse(action.key)?;
-        body.is_signer(follow.account)?;
-        let twin = Follow { by_follower: !follow.by_follower, ..follow };
-        let mut paired = false;
-        for other in body.actions()? {
-            let other = other?;
-            if parse(other.key).is_some_and(|key| key == twin) {
-                if other.new_value != action.new_value {
-                    return None;
-                }
-                paired = true;
-            }
-        }
-        if !paired {
+        if !follow.by_follower {
             return None;
         }
+        signers.is_signer(follow.account)?;
+        let twin = actions.next()??;
+        let same = parse(twin.key)? == Follow { by_follower: false, ..follow } && twin.new_value == action.new_value;
+        same.then_some(())?;
     }
     Some(())
 }

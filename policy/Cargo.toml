@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-lattice-policy-rules = { git = "https://github.com/adalinxx/moniker", rev = "19155a2" }
+lattice-policy-rules = { git = "https://github.com/adalinxx/moniker", rev = "b5f52e0" }
 
 [profile.release]
 opt-level = "z"

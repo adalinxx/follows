@@ -24,7 +24,8 @@ keys, so that each end of the graph is one prefix read:
 | `followers/<t>/<p>/<a>` | who follows `<t>`: read `followers/<t>/` |
 
 Only `<a>` writes or deletes its keys, always both in one transaction, to the
-same value; clients write `"1"`. The chain starts with neither, so the two
+same value, the `followers/` key directly after its `follows/` twin; clients
+write `"1"`. The chain starts with neither, so the two
 lists always agree.
 
 This chain can't see Moniker, so it can't check that `<a>` acts for `<p>`.

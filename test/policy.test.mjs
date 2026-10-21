@@ -50,8 +50,6 @@ test("an account follows, refollows and unfollows as a profile, both keys at onc
   assert.ok(accepts(both(P, Q, ALICE, { oldValue: "1", newValue: "1" })));
   assert.ok(accepts(both(P, Q, ALICE, { oldValue: "1" })));
   assert.ok(accepts([...both(P, Q, ALICE, { newValue: "1" }), ...both(P, R, ALICE, { newValue: "1" })]));
-  // The twin may come first, or after other follows.
-  assert.ok(accepts([{ key: follower(P, Q, ALICE), newValue: "1" }, ...both(P, R, ALICE, { newValue: "1" }), { key: follow(P, Q, ALICE), newValue: "1" }]));
   // Any profile, owned by anyone: who acts for it is Moniker's business, checked by readers.
   assert.ok(accepts(both(Q, P, ALICE, { newValue: "1" })));
   assert.ok(accepts(both(P, P, ALICE, { newValue: "1" })));
@@ -68,6 +66,24 @@ test("one key without its twin is refused", () => {
   assert.ok(!accepts([{ key: follow(P, Q, ALICE), newValue: "1" }, { key: follower(P, Q, BOB), newValue: "1" }], { signers: [ALICE, BOB] }));
   // Ends swapped: Q following P is no twin of P following Q.
   assert.ok(!accepts([{ key: follow(P, Q, ALICE), newValue: "1" }, { key: follower(Q, P, ALICE), newValue: "1" }]));
+});
+
+test("the twin comes directly after: not first, not after other follows", () => {
+  assert.ok(!accepts([{ key: follower(P, Q, ALICE), newValue: "1" }, { key: follow(P, Q, ALICE), newValue: "1" }]));
+  assert.ok(!accepts([{ key: follow(P, Q, ALICE), newValue: "1" }, ...both(P, R, ALICE, { newValue: "1" }), { key: follower(P, Q, ALICE), newValue: "1" }]));
+});
+
+test("the work grows with the transaction, no faster", () => {
+  const time = (n) => {
+    const actions = [];
+    for (let i = 0; i < n; i++) actions.push(...both(P, `${"q".repeat(12)}${String(i).padStart(4, "a").replace(/[0-9]/g, (d) => "abcdefghij"[d])}`, ALICE, { newValue: "1" }));
+    const start = performance.now();
+    assert.ok(accepts(actions));
+    return performance.now() - start;
+  };
+  time(500);
+  const [small, large] = [time(2000), time(8000)];
+  assert.ok(large < small * 8, `${small.toFixed(1)}ms for 2000, ${large.toFixed(1)}ms for 8000`);
 });
 
 test("the twins always hold the same value", () => {
