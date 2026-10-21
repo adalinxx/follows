@@ -24,3 +24,9 @@ export const label = (profile) => profile.name ?? (profile.handle ? `@${profile.
 
 /** `1 follower`, `2 followers`, `1,204 following`. */
 export const count = (n, one, many = `${one}s`) => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
+
+/**
+ * An account's ID, short enough to read and compare: its end, since every
+ * address begins alike (`bafyrei…`).
+ */
+export const shortID = (address) => `…${address.slice(-8)}`;

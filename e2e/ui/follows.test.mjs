@@ -148,7 +148,8 @@ test("a @handle opens the name's page: whoever owns it, its counts and Follow", 
   await expect(counts(page)).toHaveText(["4 followers", "4 following"]);
   await expect(followButton(page)).toHaveText("Follow @ada");
   await expect(page.getByRole("link", { name: "Moniker page" })).toHaveAttribute("href", "https://app.moniker.bio/#/%40ada");
-  // No raw account IDs on the page, and the search field is clear again.
+  // The owner shows as the end of its ID, never the whole address; the search field is clear again.
+  await expect(page.getByRole("link", { name: `Owned by …${p.ada.address.slice(-8)}` })).toHaveAttribute("href", `#/${p.ada.address}`);
   await expect(page.locator("main")).not.toContainText("bafyrei");
   await expect(page.locator("#search")).toHaveValue("");
   assert.match(page.url(), /#\/%40ada$/);
@@ -165,12 +166,19 @@ test("a handle may be typed without @ and in capitals", async () => {
   }
 });
 
-test("the owner's page is the account: every name it owns, and its own followers", async () => {
+test("the owner's page is the account: its ID, every name it owns, and its own followers", async () => {
   const page = await open("#/@ada");
-  await page.getByRole("link", { name: "Owner's page" }).click();
+  await page.getByRole("link", { name: /^Owned by / }).click();
   assert.ok(page.url().endsWith(`#/${p.ada.address}`), page.url());
   await expect(title(page)).toHaveText("Ada Lovelace");
+  // Not the name's page: it says it is an account, with the ID the name page showed, and labels its names.
+  await expect(page.locator(".person .account")).toHaveText(`Account …${p.ada.address.slice(-8)}Copy`);
+  await expect(page.locator(".person .names")).toHaveText("Name@ada");
   await expect(page.locator(".person .names a")).toHaveText(["@ada"]);
+  await expect(followButton(page)).toHaveText("Follow account");
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.getByRole("button", { name: "Copy account ID" }).click();
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), p.ada.address);
   await expect(counts(page)).toHaveText(["1 follower", "4 following"]);
   await page.getByRole("link", { name: "@ada", exact: true }).click();
   await expect(counts(page).first()).toHaveText("4 followers");
@@ -199,7 +207,7 @@ test("a name no one owns still has a page, with who follows it", async () => {
   await expect(title(page)).toHaveText("@nobody_has_this");
   await expect(page.locator(".person .names")).toHaveText("@nobody_has_this · No one owns this name yet");
   await expect(counts(page)).toHaveText(["0 followers"]);
-  await expect(page.getByRole("link", { name: "Owner's page" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /^Owned by / })).toHaveCount(0);
   await close(page);
   page = await open("#/@ghost");
   await expect(counts(page)).toHaveText(["1 follower"]);
@@ -264,7 +272,7 @@ test("someone with no follows either way sees both empty lists", async () => {
   await close(page);
 });
 
-test("an account with no Moniker card shows as Unnamed account, never as an ID", async () => {
+test("an account with no Moniker card shows as Unnamed account, with only the end of its ID", async () => {
   const page = await open(`#/${p.dan.address}`);
   await expect(title(page)).toHaveText("Unnamed account");
   await expect(page.locator(".person .avatar")).toHaveText("?");
@@ -291,8 +299,8 @@ test(`a long list (${FANS} followers) shows 50 at a time, and its filter looks t
     assert.ok(Date.now() - started < 1000, `filtering took ${Date.now() - started} ms`);
   }
   await expect(page.locator("#results")).toHaveText("1 result");
-  await page.fill("#filter", "zzz");
-  await expect(page.locator(".people")).toHaveText("No one here matches “zzz”.");
+  await page.fill("#filter", "zz_zz");
+  await expect(page.locator(".people")).toHaveText("No one here matches “zz_zz”.");
   await page.fill("#filter", "");
   await expect(page.locator(".people li")).toHaveCount(FANS);
   await close(page);
@@ -445,11 +453,11 @@ test("following a name: the wallet is asked once, the button turns at once, the 
 test("following an account from its page follows the account, not its name, and names it to screen readers", async () => {
   const fan = newAccount();
   const page = await open(`#/${p.tara.address}`, { before: (page) => withWallet(page, fan) });
-  await expect(followButton(page)).toHaveText("Follow");
-  await expect(followButton(page)).toHaveAccessibleName("Follow Tara Get");
+  await expect(followButton(page)).toHaveText("Follow account");
+  await expect(followButton(page)).toHaveAccessibleName("Follow account, Tara Get");
   await followButton(page).click();
   await expect(note(page)).toHaveText("Saved.", { timeout: 120_000 });
-  await expect(followButton(page)).toHaveText("Following");
+  await expect(followButton(page)).toHaveText("Following account");
   await expect(counts(page).first()).toHaveText("1 follower");
   assert.deepEqual(page.requests[0].actions.map((a) => a.key).sort(), [`followers/${p.tara.address}/${fan.address}`, `user/${fan.address}/follows/${p.tara.address}`]);
   await close(page);

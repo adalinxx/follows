@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { count, label, matches, parseWho } from "../app/lib.mjs";
+import { count, label, matches, parseWho, shortID } from "../app/lib.mjs";
 
 const address = "bafyreibc6ggvvnkjlyjghue3qxnagcoprbsh725cutnnnkt3t6dambbt6a";
 
@@ -34,4 +34,8 @@ test("counts read naturally", () => {
   assert.equal(count(1, "follower"), "1 follower");
   assert.equal(count(1204, "follower"), "1,204 followers");
   assert.equal(count(1, "following", "following"), "1 following");
+});
+
+test("an account ID is shown by its end, which tells accounts apart", () => {
+  assert.equal(shortID(address), "…dambbt6a");
 });

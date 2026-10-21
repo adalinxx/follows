@@ -103,4 +103,7 @@ test("a follow or unfollow waiting for a block is found in transaction bodies", 
   const others = { signers: [BOB], actions: [{ key: records.followKey(BOB, "alice"), newValue: "1" }] };
   assert.deepEqual(records.pendingIn([follow, unfollow, others, undefined, {}], ALICE), { "@bob": true, [CAROL]: false });
   assert.deepEqual(records.pendingIn([others], ALICE), {});
+  // Malformed bodies are skipped, not fatal: a signer string that merely contains the address, odd actions.
+  const odd = [{ signers: `x${ALICE}x`, actions: follow.actions }, { signers: [ALICE], actions: "nope" }, { signers: [ALICE], actions: [null, { key: 7 }, { key: records.followKey(ALICE, "dan"), newValue: "1" }] }];
+  assert.deepEqual(records.pendingIn(odd, ALICE), { "@dan": true });
 });

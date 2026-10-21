@@ -7,8 +7,8 @@
 //   <follows-button target="@ada" owner="bafyrei…"></follows-button>
 //   <follows-button target="bafyrei…" label="Ada Lovelace"></follows-button>
 //
-// On a name it reads "Follow @ada", so it says what is followed; on an
-// account, "Follow", with `label` naming the account for screen readers.
+// It says what it follows: "Follow @ada" on a name, "Follow account" on an
+// account, with `label` naming the account for screen readers.
 // `owner` (the name's owner) hides it on your own name, as on your account.
 //
 // A follow takes about a block to save: the button shows the new state at
@@ -98,14 +98,14 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         // While saving, the button already shows where it is going; the note says it is saving.
         const on = state === "following" || (state === "saving" && this.#want);
         const target = this.#target;
-        const shown = target.startsWith("@") ? ` ${target}` : "";
-        const named = target.startsWith("@") ? target : this.getAttribute("label") || "this account";
+        const shown = target.startsWith("@") ? ` ${target}` : " account";
+        const label = target.startsWith("@") ? "" : this.getAttribute("label");
         const verb = on ? "Following" : "Follow";
         this.#now.textContent = state === "loading" ? "" : `${verb}${shown}`;
         this.#button.className = `${on ? "on" : ""} ${state === "following" ? "ready" : ""} ${state === "saving" ? "saving" : ""}`;
         this.#button.dataset.unfollow = `Unfollow${shown}`;
         // The name read out begins with the words shown (WCAG 2.5.3).
-        this.#button.setAttribute("aria-label", `${verb} ${named}`);
+        this.#button.setAttribute("aria-label", `${verb}${shown}${label ? `, ${label}` : ""}`);
         // Never disabled: a disabled button drops keyboard focus.
         this.#button.setAttribute("aria-disabled", String(state === "loading" || state === "saving"));
         this.#button.toggleAttribute("aria-busy", state === "loading");

@@ -16,7 +16,7 @@ import * as sdk from "../vendor/lattice-sdk.js";
 import { createFollows } from "../src/index.mjs";
 import { defineFollowButton } from "../src/element.mjs";
 import { createMoniker } from "./vendor/moniker-sdk/src/index.mjs";
-import { count, label, matches, parseWho } from "./lib.mjs";
+import { count, label, matches, parseWho, shortID } from "./lib.mjs";
 
 const params = new URLSearchParams(location.search);
 const nodes = params.get("node")?.split(",");
@@ -156,24 +156,37 @@ async function profilePage(who, found) {
   shown = { who, list: "" };
   const { title } = naming(found);
   remember(who, title, handle ? `@${handle}` : "Account");
+  // A name's page says which account owns it; an account's page shows its ID
+  // and labels its names, so the two never look alike.
   const sub = handle
     ? address ? `@${esc(handle)}` : `@${esc(handle)} · No one owns this name yet`
-    : owns.length ? owns.map((h) => `<a href="${esc(link(`@${h}`))}">@${esc(h)}</a>`).join(" ") : "";
+    : `Account <span class="id" title="${esc(address)}">${esc(shortID(address))}</span><button type="button" class="copy" data-copy="${esc(address)}" aria-label="Copy account ID">Copy</button>`;
+  const names = !handle && owns.length
+    ? `<p class="names"><span class="muted">${owns.length === 1 ? "Name" : "Names"}</span>${owns.map((h) => `<a href="${esc(link(`@${h}`))}">@${esc(h)}</a>`).join("")}</p>`
+    : "";
   const links = [
+    handle && address && `<a href="${esc(link(address))}">Owned by <span class="id">${esc(shortID(address))}</span></a>`,
     address && `<a href="${esc(moniker.pageURL(followed))}" target="_blank" rel="noopener">Moniker page</a>`,
-    handle && address && `<a href="${esc(link(address))}">Owner's page</a>`,
   ].filter(Boolean).join("");
   main.innerHTML = `
     <section class="person">
       ${avatar(person ?? { handle }, 72)}
       <div>
         <h1>${esc(title)}</h1>
-        ${sub ? `<p class="muted names">${sub}</p>` : ""}
+        <p class="muted ${handle ? "names" : "account"}">${sub}</p>
+        ${names}
         ${links ? `<p class="links">${links}</p>` : ""}
       </div>
     </section>
     <p class="counts" data-followed="${esc(followed)}">${countLinks(who, n, Boolean(address))}</p>
     <div class="follow"><follows-button target="${esc(followed)}" label="${esc(title)}" ${handle && address ? `owner="${esc(address)}"` : ""}></follows-button></div>`;
+  const copy = main.querySelector(".copy");
+  if (copy) {
+    copy.onclick = () => navigator.clipboard?.writeText(copy.dataset.copy).then(() => {
+      copy.textContent = "Copied";
+      setTimeout(() => (copy.textContent = "Copy"), 2000);
+    });
+  }
   photos();
 }
 
