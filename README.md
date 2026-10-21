@@ -50,6 +50,8 @@ Names and photos for addresses come from
 
 ## The page
 
+Live at https://adalinxx.github.io/follows/app/, reading the testnet trial.
+
 `app/` is a static page: search a `@handle` or an address. A name's page
 shows who follows the name and whoever holds it now; an account's page shows
 who follows the account; each links to the other. The Following tab lists the
