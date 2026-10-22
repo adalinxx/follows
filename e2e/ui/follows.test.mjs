@@ -107,6 +107,7 @@ async function withWallet(who) {
   });
   const [worker] = context.serviceWorkers().length ? context.serviceWorkers() : [await context.waitForEvent("serviceworker")];
   const origin = worker.url().split("/").slice(0, 3).join("/");
+  context.walletOrigin = origin;
   context.answers = [];
   context.notes = [];
   context.on("page", async (opened) => {
@@ -156,6 +157,19 @@ async function connect(page) {
   await page.getByRole("button", { name: "Connect Selfhold" }).click();
   await expect(page.locator(".mine h2")).toHaveText("Your handles");
   await expect(page.getByRole("button", { name: "Connect Selfhold" })).toHaveCount(0);
+}
+
+/** In Selfhold, the person adds `who`'s key and connects this site to it instead. */
+async function walletSwitchesTo(context, who) {
+  const popup = await context.newPage();
+  await popup.goto(`${context.walletOrigin}/popup/index.html`);
+  const imported = await popup.evaluate((privHex) => chrome.runtime.sendMessage({ type: "importKey", privHex }), who.keyHex);
+  if (!imported?.ok) throw new Error(`wallet import: ${imported?.error}`);
+  await popup.evaluate(async ({ origin, address }) => {
+    const { connections = {} } = await chrome.storage.local.get("connections");
+    await chrome.storage.local.set({ connections: { ...connections, [origin]: address } });
+  }, { origin: new URL(stack.info.app).origin, address: who.address });
+  await popup.close();
 }
 
 /** Runs `body` with a page in a browser holding `who`'s key; on failure, says what the wallet saw. */
@@ -604,5 +618,54 @@ test("a follow still waiting for a block, sent from anywhere, shows as saving un
         mining("start");
       } catch {}
     }
+  });
+});
+
+test("after Selfhold switches account, a press sends nothing, shows that account's follow, and says so", async () => {
+  const [x, y] = [newAccount(), newAccount()];
+  await Promise.all([c.claim(x, "switch_x"), c.claim(y, "switch_y")]);
+  await c.follow(x, "switch_x", "tara");
+  await asPerson(x, async (page) => {
+    await connect(page);
+    await page.goto(url("#/@tara"));
+    await expect(followButton(page)).toHaveText("Following @tara");
+    await walletSwitchesTo(page.context(), y);
+    // Unfollow pressed as Y: X's follow is not Y's to undo.
+    await followButton(page).click();
+    await expect(note(page)).toHaveText("Selfhold is connected to another account now. Check, then press again.");
+    await expect(followButton(page)).toHaveText("Follow @tara");
+    assert.ok(await keyed(x, "switch_x", "tara"));
+    assert.deepEqual(page.context().answers, ["Connect"]);
+    // Pressed again, it follows as Y's handle.
+    await followButton(page).click();
+    await expect(note(page)).toHaveText("Saved.", { timeout: 180_000 });
+    assert.ok(await keyed(y, "switch_y", "tara"));
+    // Switched to the account that owns @tara: no Follow button on its own handle.
+    await walletSwitchesTo(page.context(), p.tara);
+    await expect(note(page)).toHaveText("", { timeout: 10_000 });
+    await followButton(page).click();
+    await expect(page.locator("follows-button")).toBeHidden();
+  });
+});
+
+test("a chosen handle sold elsewhere: the press sends nothing and says it isn't yours anymore", async () => {
+  const owner = newAccount();
+  await c.claim(owner, "sold_a");
+  await c.claim(owner, "sold_b");
+  await asPerson(owner, async (page) => {
+    await connect(page);
+    await page.goto(url("#/@tara"));
+    await picker(page).selectOption({ label: "as @sold_a" });
+    await expect(followButton(page)).toHaveText("Follow @tara");
+    await c.sell(owner, "sold_a", newAccount());
+    await followButton(page).click();
+    await expect(note(page)).toHaveText("@sold_a isn't yours anymore. Check, then press again.");
+    // Only @sold_b is left: no picker.
+    await expect(picker(page)).toBeHidden();
+    assert.deepEqual(page.context().answers, ["Connect"]);
+    await followButton(page).click();
+    await expect(note(page)).toHaveText("Saved.", { timeout: 180_000 });
+    assert.ok(await keyed(owner, "sold_b", "tara"));
+    assert.ok(!(await keyed(owner, "sold_a", "tara")));
   });
 });

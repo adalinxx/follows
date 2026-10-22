@@ -40,3 +40,13 @@ test("checks addresses and handles", () => {
   assert.ok(!isHandle(""));
   assert.ok(!isHandle(address.slice(0, 7) + "/x"));
 });
+
+test("an account's handles, read anew from Moniker's tip when asked fresh", async () => {
+  const reads = [];
+  const fresh = { state: async ({ fresh = false } = {}) => (reads.push(fresh), { get: async () => undefined }), names: async () => [{ handle: "ada" }, { handle: "bob" }] };
+  const graph = createFollows({ sdk, moniker: fresh });
+  assert.deepEqual(await graph.handlesOf(address), ["ada", "bob"]);
+  assert.deepEqual(reads, []);
+  assert.deepEqual(await graph.handlesOf(address, { fresh: true }), ["ada", "bob"]);
+  assert.deepEqual(reads, [true]);
+});

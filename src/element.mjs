@@ -59,6 +59,9 @@ function problem(error) {
   const text = String(error?.message ?? error);
   if (/declined|rejected|denied|cancel/i.test(text)) return "Canceled in Selfhold. Nothing was sent.";
   if (/locked/i.test(text)) return "Unlock Selfhold, then try again.";
+  // Sold or given away since it was chosen: say so, not a vague failure.
+  const gone = text.match(/@[a-z0-9_]+ isn't yours/);
+  if (gone) return `${gone[0]} anymore. Check, then press again.`;
   return "Couldn't save. Try again.";
 }
 
@@ -86,6 +89,7 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
       #drawn = 0;
       #state = "loading"; // loading | follow | following | saving
       #want = true;
+      #me = null; // the account #mine was read for
       #mine = null; // the connected account's handles, once read
       #as; // the handle that follows
       #button;
@@ -171,8 +175,9 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
        * Which of `me`'s handles follows: its one, or the one chosen in the
        * picker. False when the button hides, on one of `me`'s own handles.
        */
-      async #follower(me) {
-        const mine = await graph.handlesOf(me);
+      async #follower(me, { fresh = false } = {}) {
+        const mine = await graph.handlesOf(me, { fresh });
+        this.#me = me;
         this.#mine = mine;
         // Nobody follows themselves here: hidden on your own handles.
         if (mine.includes(this.#target)) {
@@ -237,10 +242,21 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         try {
           // Selfhold answers connect only within a click: ask before any other wait.
           const me = (await wallet().address?.()) ?? (await wallet().connect());
-          // Connected only now: which handle follows is not known yet.
+          // Read the account's handles again on every press: Selfhold may
+          // now connect another account, or a handle may have been sold.
           const known = this.#mine !== null;
-          if (!known && !(await this.#follower(me))) return;
+          const [wasMe, wasAs] = [this.#me, this.#as];
+          if (!(await this.#follower(me, { fresh: true }))) return;
           if (ticket !== this.#drawn) return;
+          if (known && wasAs && this.#as && (me !== wasMe || this.#as !== wasAs)) {
+            // What the button showed was for another follower: show this one's, and send nothing.
+            const following = await graph.follows(this.#as, target);
+            if (ticket !== this.#drawn) return;
+            this.#show(following ? "following" : "follow", me !== wasMe
+              ? "Selfhold is connected to another account now. Check, then press again."
+              : `@${escape(wasAs)} isn't yours anymore. Check, then press again.`);
+            return;
+          }
           if (!this.#as) {
             // Read again on the next press: a handle may be got meanwhile.
             this.#mine = null;
@@ -265,6 +281,8 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
           this.#show("saving", SAVING);
           await this.#landed(ticket, as, target);
         } catch (error) {
+          // Read the account's handles again on the next press.
+          if (/isn't yours/.test(String(error?.message))) this.#mine = null;
           if (ticket === this.#drawn) this.#show(before, problem(error));
         }
       }

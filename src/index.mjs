@@ -89,8 +89,12 @@ export function createFollows(options) {
     },
     /** Whether `@h` follows `@t`. */
     follows: async (h, t) => records.follows(await state(), bare(h), bare(t), owners),
-    /** The handles an account owns on Moniker, bare: the ones it may follow as. */
-    handlesOf: async (address) => (await moniker.names(address)).map((name) => name.handle),
+    /** The handles an account owns on Moniker, bare: the ones it may follow as. `fresh` reads Moniker's tip anew. */
+    handlesOf: async (address, { fresh = false } = {}) => {
+      // A fresh state is the one names() then reads.
+      if (fresh) await moniker.state({ fresh: true });
+      return (await moniker.names(address)).map((name) => name.handle);
+    },
     /**
      * What `account` is saving now: follows (`true`) and unfollows (`false`)
      * waiting in the first answering node's mempool, by `"<h>/<t>"`.
