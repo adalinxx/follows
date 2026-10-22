@@ -669,3 +669,20 @@ test("a chosen handle sold elsewhere: the press sends nothing and says it isn't 
     assert.ok(!(await keyed(owner, "sold_a", "tara")));
   });
 });
+
+test("a link's ?node=, ?chain= and ?moniker= apply to that visit only: nothing about them is stored", async () => {
+  const page = await open("#/@ada");
+  await expect(title(page)).toHaveText("@ada");
+  await page.goto(url("#/"));
+  await expect(page.locator(".recent strong")).toHaveText(["@ada"]);
+  const stored = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)));
+  assert.deepEqual(Object.keys(stored), ["follows.recent"]);
+  for (const value of Object.values(stored)) assert.ok(!value.includes("127.0.0.1") && !value.includes("Nexus"), value);
+  // The same page without the params reads the default nodes, not the link's.
+  const requests = [];
+  page.on("request", (request) => requests.push(request.url()));
+  await page.goto(`${stack.info.app}#/@ada`);
+  await page.waitForTimeout(1500);
+  assert.ok(!requests.some((r) => r.startsWith(stack.info.node)), "read from the link's node after it was left");
+  await page.context().close();
+});
