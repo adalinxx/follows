@@ -92,13 +92,6 @@ test("a handle no one owns follows no one", async () => {
   assert.ok(!(await records.follows(state, "ada", "bob", owners)));
 });
 
-test("Moniker's name values: the owner, priced or offered, or nothing", () => {
-  assert.equal(records.ownerIn(ALICE), ALICE);
-  assert.equal(records.ownerIn(`${ALICE}@500`), ALICE);
-  assert.equal(records.ownerIn(`${ALICE}>${BOB}`), ALICE);
-  for (const value of [undefined, "", "alice", `x${ALICE}`, 7]) assert.equal(records.ownerIn(value), undefined, String(value));
-});
-
 test("unfollow deletes both of the account's keys; repeats write nothing", async () => {
   const { state, submit, map } = chain();
   const { owners } = moniker();

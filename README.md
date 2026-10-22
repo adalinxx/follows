@@ -122,7 +122,7 @@ library never holds a key. Writes are free on the testnet trial.
 
 In Node, or with your own copy of the Lattice SDK, import `src/index.mjs` and
 pass the SDK in: `createFollows({ sdk, moniker })`. `moniker` needs only
-`state()` and `names(address)`, as `createMoniker` returns them.
+`state()`, `owners(handles)` and `names(address)`, as `createMoniker` returns them.
 
 ## Layout
 

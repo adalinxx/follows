@@ -8,7 +8,7 @@ const address = "bafyreibc6ggvvnkjlyjghue3qxnagcoprbsh725cutnnnkt3t6dambbt6a";
 const other = "bafyreibc6ggvvnkjlyjghue3qxnagcoprbsh725cutnnnkt3t6dambbt6a".replace(/a$/, "e");
 // Enough of a Moniker client: @ada is owned by another account; the reads asked of it are kept.
 const asked = [];
-const moniker = { state: async () => ({ get: async (key) => (asked.push(key), key === "name/ada" ? `${other}@5` : undefined) }), names: async () => [] };
+const moniker = { state: async () => ({}), owners: async (handles) => (asked.push(...handles), handles.map((h) => (h === "ada" ? other : undefined))), names: async () => [] };
 
 test("needs the SDK and Moniker", () => {
   assert.throws(() => createFollows({ moniker }), /needs \{ sdk \}/);
@@ -26,7 +26,7 @@ test("writes need a wallet, and a handle the account owns", async () => {
   const wallet = { address: async () => address, writeRecords: async () => assert.fail("sent") };
   asked.length = 0;
   await assert.rejects(createFollows({ sdk, moniker }).follow("@ada", "bob", { wallet }), /@ada isn't yours/);
-  assert.deepEqual(asked, ["name/ada"]);
+  assert.deepEqual(asked, ["ada"]);
   await assert.rejects(createFollows({ sdk, moniker }).follow("nobody", "bob", { wallet }), /@nobody isn't yours/);
 });
 

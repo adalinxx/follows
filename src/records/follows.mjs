@@ -40,16 +40,6 @@ function handles(h, t) {
 export const followKey = (h, t, account) => (handles(h, t), `follows/${h}/${t}/${account}`);
 export const followerKey = (h, t, account) => (handles(h, t), `followers/${t}/${h}/${account}`);
 
-/**
- * The owner a Moniker `name/<h>` value names: `<owner>`, `<owner>@<price>`
- * or `<owner>><account>` (offered to it). Undefined for anything else.
- */
-export function ownerIn(value) {
-  if (typeof value !== "string") return undefined;
-  const owner = value.split(/[@>]/)[0];
-  return isAddress(owner) ? owner : undefined;
-}
-
 /** The keys under `prefix`, `<prefix><handle>/<account>`, as a map from handle to its accounts, in key order. */
 async function accountsBy(state, prefix) {
   const found = new Map();

@@ -34,10 +34,11 @@ export function createFollows(options) {
   const { sdk, moniker, chain, nodes, fee, freshFor } = { ...DEFAULTS, ...options };
   if (!sdk) throw new Error("createFollows needs { sdk }: the Lattice SDK module");
   if (!moniker) throw new Error("createFollows needs { moniker }: createMoniker from moniker-sdk");
-  /** Each handle's owner on Moniker now, or undefined: one `name/<h>` read each, from one state. */
+  /** Each handle's owner on Moniker now, or undefined, in order: one `name/<h>` read each, from one state. */
   const owners = async (handles, { fresh = false } = {}) => {
-    const names = await moniker.state({ fresh });
-    return Promise.all(handles.map(async (h) => records.ownerIn(await names.get(`name/${h}`))));
+    // A fresh state is the one owners() then reads.
+    if (fresh) await moniker.state({ fresh: true });
+    return moniker.owners(handles);
   };
   const volumes = new sdk.VolumeClient(anyHost(nodes.map((node) => new sdk.HTTPVolumeTransport(`${node}/volumes`, { chainPath: chain }))));
   const load = volumeLoader(volumes, sdk.decodeDagCbor);
