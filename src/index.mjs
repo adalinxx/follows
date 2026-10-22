@@ -1,15 +1,17 @@
 // Follows for any app: one follow graph every Lattice app shares, so a
 // person's audience comes with them instead of starting at zero in each app.
-// A handle follows a handle: Moniker names, which accounts own.
+// An account follows an account, or a handle: a Moniker name, standing for
+// the account that shows it now.
 //
 //   const graph = createFollows({ sdk, moniker });      // sdk: the Lattice SDK module; moniker: createMoniker(…)
-//   const hs = await graph.following("@ada");          // the handles @ada follows
-//   const fans = await graph.followers("@bob");        // the handles following @bob
-//   await graph.follow("@ada", "@bob", { wallet: window.lattice });
+//   const people = await graph.following(address);     // [{ account, handle }, …]
+//   const fans = await graph.followers("@bob");         // the accounts following @bob's account or handle
+//   const feed = await graph.followingAccounts(address);  // the accounts to build a feed from
+//   await graph.follow("@bob", { wallet: window.lattice });
 //
-// A follow counts only while the account that wrote it owns the following
-// handle on Moniker now: when a handle is sold, its old owner's follows
-// lapse, and its followers stay.
+// Following someone who shows a handle follows the handle; following
+// someone without one follows their account. A person's followers are those
+// of their account and of the handle they show, each account once.
 //
 // Reads go to the first of `nodes` that answers and are checked by CID, so
 // they do not depend on trusting that node. Writes go to the wallet, which
@@ -18,11 +20,9 @@ import * as records from "./records/follows.mjs";
 import { anyHost, tip, view, volumeLoader } from "./records/state.mjs";
 import { writeRequest } from "./records/wallet.mjs";
 
-const { bare } = records;
-
 /** Where Follows lives now: its testnet trial chain and the shared hosts. */
 export const DEFAULTS = {
-  chain: ["Nexus", "testnet", "follows-4dabde"],
+  chain: ["Nexus", "testnet", "follows-ade46a"],
   nodes: ["https://lattice-testnet-apps-iad.fly.dev", "https://lattice-testnet-apps-ams.fly.dev"],
   // The trial chain's hosts admit 0-fee transactions: writes are free.
   fee: 0n,
@@ -34,11 +34,10 @@ export function createFollows(options) {
   const { sdk, moniker, chain, nodes, fee, freshFor } = { ...DEFAULTS, ...options };
   if (!sdk) throw new Error("createFollows needs { sdk }: the Lattice SDK module");
   if (!moniker) throw new Error("createFollows needs { moniker }: createMoniker from moniker-sdk");
-  /** Each handle's owner on Moniker now, or undefined, in order: one `name/<h>` read each, from one state. */
-  const owners = async (handles, { fresh = false } = {}) => {
-    // A fresh state is the one owners() then reads.
-    if (fresh) await moniker.state({ fresh: true });
-    return moniker.owners(handles);
+  /** Moniker as the records read it: where handles point and which handle each account shows. */
+  const names = {
+    pointers: (handles) => Promise.all(handles.map((h) => moniker.pointer(h))),
+    handlesOf: (addresses) => moniker.handlesOf(addresses),
   };
   const volumes = new sdk.VolumeClient(anyHost(nodes.map((node) => new sdk.HTTPVolumeTransport(`${node}/volumes`, { chainPath: chain }))));
   const load = volumeLoader(volumes, sdk.decodeDagCbor);
@@ -78,27 +77,34 @@ export function createFollows(options) {
     state,
     moniker,
 
-    /** The handles `@h` follows, bare, in order. */
-    following: async (h) => records.following(await state(), bare(h), owners),
-    /** The handles that follow `@t`, bare, in order, each once. */
-    followers: async (t) => records.followers(await state(), bare(t), owners),
-    /** How many handles follow `@h`, and how many it follows: `{ followers, following }`. */
-    counts: async (h) => {
+    /** Who `who` (an account, or a handle with or without @) is: `{ account, handle }`, or `{ handle }` when no account shows it. */
+    person: async (who) => records.person(names, who),
+    /** Whom `who` follows, one entry a person: `{ account, handle }`, or `{ handle }` for a handle no account shows now. */
+    following: async (who) => {
+      const { account } = await records.person(names, who);
+      return account === undefined ? [] : records.following(await state(), names, account);
+    },
+    /** The accounts `who` follows, each once: what a feed is built from. */
+    followingAccounts: async (who) => {
+      const { account } = await records.person(names, who);
+      if (account === undefined) return [];
+      return (await records.following(await state(), names, account)).flatMap((p) => (p.account === undefined ? [] : [p.account]));
+    },
+    /** The accounts that follow `who`, by its account or the handle it shows, each once. */
+    followers: async (who) => records.followers(await state(), names, who),
+    /** How many accounts follow `who`, and how many people it follows: `{ followers, following }`. */
+    counts: async (who) => {
       const s = await state();
-      const [followers, following] = await Promise.all([records.followers(s, bare(h), owners), records.following(s, bare(h), owners)]);
+      const { account } = await records.person(names, who);
+      const [followers, following] = await Promise.all([records.followers(s, names, who), account === undefined ? [] : records.following(s, names, account)]);
       return { followers: followers.length, following: following.length };
     },
-    /** Whether `@h` follows `@t`. */
-    follows: async (h, t) => records.follows(await state(), bare(h), bare(t), owners),
-    /** The handles an account owns on Moniker, bare: the ones it may follow as. `fresh` reads Moniker's tip anew. */
-    handlesOf: async (address, { fresh = false } = {}) => {
-      // A fresh state is the one names() then reads.
-      if (fresh) await moniker.state({ fresh: true });
-      return (await moniker.names(address)).map((name) => name.handle);
-    },
+    /** Whether `account` follows `who`, by account or handle. */
+    follows: async (account, who) => records.follows(await state(), names, account, who),
     /**
      * What `account` is saving now: follows (`true`) and unfollows (`false`)
-     * waiting in the first answering node's mempool, by `"<h>/<t>"`.
+     * waiting in the first answering node's mempool, by followed target:
+     * an address or `@<h>`.
      */
     pending: async (account) => {
       for (const node of nodes) {
@@ -130,21 +136,23 @@ export function createFollows(options) {
     },
 
     /**
-     * `@h` follows `@t`, written by the connected account, which must own `@h`
-     * on Moniker. Resolves to undefined when its follow is there already.
+     * The connected account follows `who`: the handle they show, else their
+     * account. Resolves to undefined when it follows them already.
      */
-    follow: async (h, t, { wallet }) => {
+    follow: async (who, { wallet }) => {
       const account = await me(wallet);
-      const [owner] = await owners([bare(h)], { fresh: true });
-      if (owner !== account) throw new Error(`@${bare(h)} isn't yours`);
-      return send(wallet, await records.follow(await state({ fresh: true }), account, bare(h), bare(t)));
+      await moniker.state({ fresh: true });
+      // Before reading Follows: nobody follows themselves.
+      if ((await records.person(names, who)).account === account) throw new Error("You can't follow yourself.");
+      return send(wallet, await records.follow(await state({ fresh: true }), names, account, who));
     },
-    /** The connected account's follow of `@t` as `@h` is deleted. Resolves to undefined when there was none. */
-    unfollow: async (h, t, { wallet }) => {
+    /** The connected account stops following `who`, by account and by handle. Resolves to undefined when it didn't. */
+    unfollow: async (who, { wallet }) => {
       const account = await me(wallet);
-      return send(wallet, await records.unfollow(await state({ fresh: true }), account, bare(h), bare(t)));
+      await moniker.state({ fresh: true });
+      return send(wallet, await records.unfollow(await state({ fresh: true }), names, account, who));
     },
   };
 }
 
-export const { isAddress, isHandle } = records;
+export const { isAddress, isHandle, target } = records;

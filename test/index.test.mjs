@@ -6,9 +6,12 @@ import { createFollows, DEFAULTS, isAddress, isHandle } from "../src/index.mjs";
 const sdk = { VolumeClient: class {}, HTTPVolumeTransport: class {}, decodeDagCbor: () => undefined };
 const address = "bafyreibc6ggvvnkjlyjghue3qxnagcoprbsh725cutnnnkt3t6dambbt6a";
 const other = "bafyreibc6ggvvnkjlyjghue3qxnagcoprbsh725cutnnnkt3t6dambbt6a".replace(/a$/, "e");
-// Enough of a Moniker client: @ada is owned by another account; the reads asked of it are kept.
-const asked = [];
-const moniker = { state: async () => ({}), owners: async (handles) => (asked.push(...handles), handles.map((h) => (h === "ada" ? other : undefined))), names: async () => [] };
+// Enough of a Moniker client: @ada points at `other`, which shows it; the account `address` shows no handle.
+const moniker = {
+  state: async () => ({}),
+  pointer: async (h) => (h === "ada" ? other : undefined),
+  handlesOf: async (accounts) => accounts.map((a) => (a === other ? "ada" : undefined)),
+};
 
 test("needs the SDK and Moniker", () => {
   assert.throws(() => createFollows({ moniker }), /needs \{ sdk \}/);
@@ -21,13 +24,22 @@ test("defaults to the testnet trial chain and its shared hosts", () => {
   assert.deepEqual(graph.nodes, DEFAULTS.nodes);
 });
 
-test("writes need a wallet, and a handle the account owns", async () => {
-  await assert.rejects(createFollows({ sdk, moniker }).follow("@ada", "@bob", { wallet: undefined }), /Lattice wallet/);
-  const wallet = { address: async () => address, writeRecords: async () => assert.fail("sent") };
-  asked.length = 0;
-  await assert.rejects(createFollows({ sdk, moniker }).follow("@ada", "bob", { wallet }), /@ada isn't yours/);
-  assert.deepEqual(asked, ["ada"]);
-  await assert.rejects(createFollows({ sdk, moniker }).follow("nobody", "bob", { wallet }), /@nobody isn't yours/);
+test("writes need a wallet; nobody follows themselves", async () => {
+  await assert.rejects(createFollows({ sdk, moniker }).follow("@ada", { wallet: undefined }), /Lattice wallet/);
+  const wallet = { address: async () => other, writeRecords: async () => assert.fail("sent") };
+  await assert.rejects(createFollows({ sdk, moniker }).follow("@ada", { wallet }), /yourself/);
+  await assert.rejects(createFollows({ sdk, moniker }).follow("Ada!", { wallet }), /not an account or a handle/);
+});
+
+test("a person is an account with the handle it shows, or a handle alone", async () => {
+  const graph = createFollows({ sdk, moniker });
+  assert.deepEqual(await graph.person("ada"), { account: other, handle: "ada" });
+  assert.deepEqual(await graph.person(other), { account: other, handle: "ada" });
+  assert.deepEqual(await graph.person(address), { account: address });
+  assert.deepEqual(await graph.person("@nobody"), { handle: "nobody" });
+  // A handle no account shows follows no one.
+  assert.deepEqual(await graph.following("@nobody"), []);
+  assert.deepEqual(await graph.followingAccounts("@nobody"), []);
 });
 
 test("checks addresses and handles", () => {
@@ -39,14 +51,4 @@ test("checks addresses and handles", () => {
   assert.ok(!isHandle("Ada"));
   assert.ok(!isHandle(""));
   assert.ok(!isHandle(address.slice(0, 7) + "/x"));
-});
-
-test("an account's handles, read anew from Moniker's tip when asked fresh", async () => {
-  const reads = [];
-  const fresh = { state: async ({ fresh = false } = {}) => (reads.push(fresh), { get: async () => undefined }), names: async () => [{ handle: "ada" }, { handle: "bob" }] };
-  const graph = createFollows({ sdk, moniker: fresh });
-  assert.deepEqual(await graph.handlesOf(address), ["ada", "bob"]);
-  assert.deepEqual(reads, []);
-  assert.deepEqual(await graph.handlesOf(address, { fresh: true }), ["ada", "bob"]);
-  assert.deepEqual(reads, [true]);
 });
