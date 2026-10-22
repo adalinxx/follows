@@ -11,9 +11,8 @@ Follows is its own Lattice chain. It holds follows and nothing else.
 A handle follows a handle. Handles are names on
 [Moniker](https://github.com/adalinxx/moniker), the names chain: an account
 (a key, never shown) owns `@<h>` as `name/<h>` there, and may sell it or
-give it away. A handle is lowercase letters, digits and `_`. Profiles live on
-each app's own chain; Follows has none of its own, and no account follows an
-account.
+give it away. A handle is lowercase letters, digits and `_`. Follows keeps
+no profiles, and no account follows an account.
 
 A follow of `@<t>` by `@<h>`, written by account `<a>`, is two keys, so that
 each end of the graph is one prefix read:
@@ -78,13 +77,13 @@ Handles come back bare (`"bob"`); they are taken with or without `@`.
 
 ### Showing followers in your app
 
-Your app's profiles live on your chain, and a profile shows `@h` while it
-names `h` and Moniker points `h` back at it (moniker-sdk's `createProfiles`
-checks both: `p.handle`). Followers are of the handle, so show
-`graph.followers(p.handle)` and `graph.counts(p.handle)` on a profile that
-shows one; a profile without a handle has no followers here. To show a
-follower as your app's profile, look up the profile its handle points at
-on your chain (`people.profileOf("@" + h)`), else just `@h`.
+Followers are of a handle. An account shows `@h` in every app while it names
+`h` (`user/<a>/name` on Moniker) and `h` points back at it (`points/<h>`):
+`moniker.handleOf(address)` checks both. So on a person's page in your app,
+show `graph.followers(h)` and `graph.counts(h)` for the handle it shows; an
+account that shows none has no followers here. A follower is shown as its
+`@handle`, linked to whatever your app shows for the account it points at
+(`moniker.pointer(h)`).
 
 A Follow button for any page, which asks Selfhold only when pressed:
 
