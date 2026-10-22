@@ -4,15 +4,15 @@ import * as sdk from "../../vendor/lattice-sdk.js";
 import * as follows from "../../src/records/follows.mjs";
 import { tip, view, volumeLoader } from "../../src/records/state.mjs";
 import { transaction } from "../../src/records/wallet.mjs";
-import * as profile from "../../app/vendor/moniker-sdk/src/records/profile.mjs";
+import * as names from "../../app/vendor/moniker-sdk/src/records/names.mjs";
 import { FOLLOWS, MONIKER } from "./stack.mjs";
 
 export { sdk };
 
-/** A new account: its address and private key. */
+/** A new account: its address, private key, and the key in hex for Selfhold. */
 export function newAccount() {
   const privateKey = sdk.generatePrivateKey();
-  return { address: sdk.accountFromPrivateKey(privateKey).address, privateKey };
+  return { address: sdk.accountFromPrivateKey(privateKey).address, privateKey, keyHex: Buffer.from(privateKey).toString("hex") };
 }
 
 export async function until(label, condition, seconds = 300) {
@@ -67,41 +67,24 @@ export function client(node) {
     state,
     submit,
     write,
-    /** A new profile owned by `who`, with `card` and the free name `handle` if given; its id, once landed. */
-    profile: async (who, card, handle) => {
-      const { id, write: created } = await profile.createProfile(await state.moniker(), who.address, { card, handle });
-      await write(MONIKER, who, created.actions);
-      return id;
+    /** The actions for `who` claiming the free `@handle`, unsent. */
+    claimActions: async (who, handle) => (await names.claim(await state.moniker(), who.address, handle)).actions,
+    /** `who` claims the free `@handle` on Moniker. */
+    claim: async (who, handle) => write(MONIKER, who, (await names.claim(await state.moniker(), who.address, handle)).actions),
+    /** `from` sells `@handle` to `to` (listed at 0, then bought). */
+    sell: async (from, handle, to) => {
+      await write(MONIKER, from, (await names.list(await state.moniker(), from.address, handle, 0n)).actions);
+      await write(MONIKER, to, (await names.buy(await state.moniker(), to.address, handle)).actions);
     },
-    /** Account `who`, acting for profile `p`, follows each of `targets`, in one transaction. */
-    follow: async (who, p, ...targets) => {
+    /** Account `who`, as `@h`, follows each of `targets`, in one transaction. */
+    follow: async (who, h, ...targets) => {
       const s = await state.follows();
       const actions = [];
-      for (const t of targets) actions.push(...(await follows.follow(s, who.address, p, t)).actions);
+      for (const t of targets) actions.push(...(await follows.follow(s, who.address, h, t)).actions);
       await write(FOLLOWS, who, actions);
     },
-    /** The actions for `who`, as `p`, following `t`, unsent. */
-    followActions: async (who, p, t) => (await follows.follow(await state.follows(), who.address, p, t)).actions,
-    unfollow: async (who, p, t) => write(FOLLOWS, who, (await follows.unfollow(await state.follows(), who.address, p, t)).actions),
-    /** `owner` makes account `admin` an admin of its profile `p`. */
-    admin: async (owner, p, admin) => write(MONIKER, owner, (await profile.setAdmin(await state.moniker(), owner.address, p, admin.address)).actions),
-    /** `from` offers its profile `p` to `to`, who takes it. */
-    hand: async (from, p, to) => {
-      await write(MONIKER, from, (await profile.setProfileTerms(await state.moniker(), from.address, p, { offer: to.address })).actions);
-      await write(MONIKER, to, (await profile.takeProfile(await state.moniker(), to.address, p)).actions);
-    },
+    /** The actions for `who`, as `@h`, following `@t`, unsent. */
+    followActions: async (who, h, t) => (await follows.follow(await state.follows(), who.address, h, t)).actions,
+    unfollow: async (who, h, t) => write(FOLLOWS, who, (await follows.unfollow(await state.follows(), who.address, h, t)).actions),
   };
-}
-
-/** A one-block media Volume, `{ type, bytes }`, kept by the node; its CID. */
-export async function pinMedia(info, type, bytes) {
-  const block = sdk.encodeDagCbor({ bytes, type });
-  const cid = sdk.cidV1DagCbor(block);
-  const r = await fetch(`${info.rpc}/pins`, {
-    method: "POST",
-    headers: { Authorization: `Basic ${btoa(info.cookie())}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ cid, entries: { [cid]: Buffer.from(block).toString("base64") } }),
-  });
-  if (!r.ok) throw new Error(`pin: ${r.status} ${await r.text()}`);
-  return cid;
 }
