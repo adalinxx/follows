@@ -1,21 +1,19 @@
 //! Transaction-scope validity policy for Follows, the follow graph Lattice
 //! apps share.
 //!
-//! A handle follows a handle. Handles are Moniker names: an account owns
-//! them. A follow of `@<t>` by `@<h>`, written by account `<a>`, is two keys,
-//! so that both ends read by prefix:
+//! An account follows an account, or a handle: a Moniker name, followed
+//! whoever it points at. A follow of `<t>` by account `<a>` is two keys, so
+//! that both ends read by prefix:
 //!
-//! - `follows/<h>/<t>/<a>`: what `@<h>` follows.
-//! - `followers/<t>/<h>/<a>`: who follows `@<t>`.
+//! - `follows/<a>/<t>`: what `<a>` follows.
+//! - `followers/<t>/<a>`: who follows `<t>`.
 //!
 //! `<a>` is an account address and must sign: only an account writes or
-//! deletes its own keys. `<h>` and `<t>` are handles, lowercase letters,
-//! digits and `_`. This chain can't see Moniker, so it can't check that `<a>`
-//! owns `@<h>`: readers count a follow only while it does. A transaction that
-//! writes `follows/` writes its `followers/` twin directly after, to the same
-//! new value, or deletes both. The chain starts with neither, so the two
-//! always agree, and the policy reads each pair once. Values mean nothing else
-//! to the chain.
+//! deletes its own keys. `<t>` is an account address, or `@` and a handle,
+//! lowercase letters, digits and `_`. A transaction that writes `follows/`
+//! writes its `followers/` twin directly after, to the same new value, or
+//! deletes both. The chain starts with neither, so the two always agree, and
+//! the policy reads each pair once. Values mean nothing else to the chain.
 //!
 //! Coin actions pass untouched.
 #![cfg_attr(not(test), no_std)]
@@ -30,13 +28,12 @@ pub fn validate(context: &[u8], scratch: &mut [u32]) -> bool {
     transaction_body(context).and_then(|body| check_body(body, scratch)).is_some()
 }
 
-/// A follow key read: which handle follows which, written by which account,
-/// and which of the two keys it is.
+/// A follow key read: which account follows what, and which of the two keys
+/// it is.
 #[derive(PartialEq)]
 struct Follow<'a> {
-    follower: &'a [u8],
-    followed: &'a [u8],
     account: &'a [u8],
+    followed: &'a [u8],
     by_follower: bool,
 }
 
@@ -65,10 +62,18 @@ fn parse(key: &[u8]) -> Option<Follow<'_>> {
         b"followers" => false,
         _ => return None,
     };
-    let (first, second, account) = (segments.next()?, segments.next()?, segments.next()?);
-    let (follower, followed) = if by_follower { (first, second) } else { (second, first) };
-    let well_formed = segments.next().is_none() && is_handle(follower) && is_handle(followed) && is_address(account);
-    well_formed.then_some(Follow { follower, followed, account, by_follower })
+    let (first, second) = (segments.next()?, segments.next()?);
+    let (account, followed) = if by_follower { (first, second) } else { (second, first) };
+    let well_formed = segments.next().is_none() && is_address(account) && is_followed(followed);
+    well_formed.then_some(Follow { account, followed, by_follower })
+}
+
+/// What an account follows: an account address, or `@` and a Moniker handle.
+fn is_followed(text: &[u8]) -> bool {
+    match text.split_first() {
+        Some((b'@', handle)) => is_handle(handle),
+        _ => is_address(text),
+    }
 }
 
 /// A Moniker handle: lowercase letters, digits and `_`.
