@@ -63,28 +63,41 @@ export function client(node) {
     });
   }
 
+  /** Moniker as the records read it, from its tip now. */
+  const resolver = async () => {
+    const m = await state.moniker();
+    return { pointers: (hs) => Promise.all(hs.map((h) => names.pointer(m, h))), handlesOf: (as) => names.handlesOf(m, as) };
+  };
+  /** The actions for `who` following `t`, an account or a @handle, as the library writes them. */
+  const followActions = async (who, t) => (await follows.follow(await state.follows(), await resolver(), who.address, t)).actions;
+
   return {
     state,
     submit,
     write,
-    /** The actions for `who` claiming the free `@handle`, unsent. */
-    claimActions: async (who, handle) => (await names.claim(await state.moniker(), who.address, handle)).actions,
-    /** `who` claims the free `@handle` on Moniker. */
-    claim: async (who, handle) => write(MONIKER, who, (await names.claim(await state.moniker(), who.address, handle)).actions),
-    /** `from` sells `@handle` to `to` (listed at 0, then bought). */
-    sell: async (from, handle, to) => {
-      await write(MONIKER, from, (await names.list(await state.moniker(), from.address, handle, 0n)).actions);
-      await write(MONIKER, to, (await names.buy(await state.moniker(), to.address, handle)).actions);
+    /** The actions for `who` claiming the free `@handle` and showing it, unsent. */
+    claimActions: async (who, handle) => (await names.claim(await state.moniker(), who.address, handle, { show: true })).actions,
+    /** `who` claims the free `@handle` on Moniker and shows it. */
+    claim: async (who, handle) => write(MONIKER, who, (await names.claim(await state.moniker(), who.address, handle, { show: true })).actions),
+    /** `who` stops showing its handle: apps show its account's tail. */
+    stopShowing: async (who) => write(MONIKER, who, (await names.stopShowing(await state.moniker(), who.address)).actions),
+    /** `from` gives `@handle` to `to`, who takes it and shows it. */
+    give: async (from, handle, to) => {
+      await write(MONIKER, from, (await names.offerName(await state.moniker(), from.address, handle, to.address)).actions);
+      await write(MONIKER, to, (await names.buy(await state.moniker(), to.address, handle, { show: true })).actions);
     },
-    /** Account `who`, as `@h`, follows each of `targets`, in one transaction. */
-    follow: async (who, h, ...targets) => {
-      const s = await state.follows();
+    /** `who` follows each of `targets` (accounts or @handles) as the library would, in one transaction. */
+    follow: async (who, ...targets) => {
       const actions = [];
-      for (const t of targets) actions.push(...(await follows.follow(s, who.address, h, t)).actions);
+      for (const t of targets) actions.push(...(await followActions(who, t)));
       await write(FOLLOWS, who, actions);
     },
-    /** The actions for `who`, as `@h`, following `@t`, unsent. */
-    followActions: async (who, h, t) => (await follows.follow(await state.follows(), who.address, h, t)).actions,
-    unfollow: async (who, h, t) => write(FOLLOWS, who, (await follows.unfollow(await state.follows(), who.address, h, t)).actions),
+    followActions,
+    /** `who` follows `account` by its account, whatever handle it shows. */
+    followAccount: async (who, account) =>
+      write(FOLLOWS, who, [follows.followKey(who.address, account), follows.followerKey(who.address, account)].map((key) => ({ key, newValue: "1" }))),
+    unfollow: async (who, t) => write(FOLLOWS, who, (await follows.unfollow(await state.follows(), await resolver(), who.address, t)).actions),
+    /** Whether `who` holds a follow key for `t`, exactly as given (an address or `@h`). */
+    keyed: async (who, t) => (await (await state.follows()).get(follows.followKey(who.address, t))) === "1",
   };
 }
