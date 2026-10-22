@@ -14,13 +14,11 @@ import { context, validate } from "./host.mjs";
 const PATH = ["Nexus", "follows"];
 const address = (seed) => sdk.addressFromPublicKey(sdk.publicKeyFromPrivate(new Uint8Array(32).fill(seed)));
 const [ALICE, BOB, CAROL] = [address(1), address(2), address(3)];
-// Profiles, by id: Alice's, Bob's, Carol's, and a second of Alice's.
-const [PA, PB, PC, PA2] = ["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "cccccccccccccccc", "aaaaaaaaaaaaaaa2"];
 
-/** Who acts for each profile, as Moniker would say: its owner, then its admins. Change it to sell a profile. */
+/** Who owns each handle, as Moniker would say. Change it to sell a handle. */
 function moniker() {
-  const acting = new Map([[PA, [ALICE]], [PB, [BOB]], [PC, [CAROL]], [PA2, [ALICE]]]);
-  return { acting, actsFor: async (account, p) => (acting.get(p) ?? []).includes(account) };
+  const owner = new Map([["ada", ALICE], ["ada_2", ALICE], ["bob", BOB], ["cara", CAROL]]);
+  return { owner, owners: async (handles) => handles.map((h) => owner.get(h)) };
 }
 
 function chain() {
@@ -46,98 +44,106 @@ function chain() {
 
 test("follows are read from both ends", async () => {
   const { state, submit } = chain();
-  const { actsFor } = moniker();
-  assert.ok(submit(ALICE, await records.follow(state, ALICE, PA, PB)));
-  assert.ok(submit(ALICE, await records.follow(state, ALICE, PA, PC)));
-  assert.ok(submit(CAROL, await records.follow(state, CAROL, PC, PB)));
-  assert.deepEqual(await records.following(state, PA, actsFor), [PB, PC]);
-  assert.deepEqual(await records.followers(state, PB, actsFor), [PA, PC]);
-  assert.deepEqual(await records.followers(state, PC, actsFor), [PA]);
-  assert.deepEqual(await records.followers(state, PA, actsFor), []);
-  assert.ok(await records.follows(state, PA, PB, actsFor));
-  assert.ok(!(await records.follows(state, PB, PA, actsFor)));
+  const { owners } = moniker();
+  assert.ok(submit(ALICE, await records.follow(state, ALICE, "ada", "bob")));
+  assert.ok(submit(ALICE, await records.follow(state, ALICE, "ada", "cara")));
+  assert.ok(submit(CAROL, await records.follow(state, CAROL, "cara", "bob")));
+  assert.deepEqual(await records.following(state, "ada", owners), ["bob", "cara"]);
+  assert.deepEqual(await records.followers(state, "bob", owners), ["ada", "cara"]);
+  assert.deepEqual(await records.followers(state, "cara", owners), ["ada"]);
+  assert.deepEqual(await records.followers(state, "ada", owners), []);
+  assert.ok(await records.follows(state, "ada", "bob", owners));
+  assert.ok(!(await records.follows(state, "bob", "ada", owners)));
 });
 
-test("a profile counts once, however many of its accounts wrote the follow", async () => {
+test("an account with two handles follows as each, separately", async () => {
   const { state, submit } = chain();
-  const { acting, actsFor } = moniker();
-  acting.set(PA, [ALICE, BOB]); // Bob is an admin of Alice's profile
-  assert.ok(submit(ALICE, await records.follow(state, ALICE, PA, PC)));
-  assert.ok(submit(BOB, await records.follow(state, BOB, PA, PC)));
-  assert.deepEqual(await records.followers(state, PC, actsFor), [PA]);
-  assert.deepEqual(await records.following(state, PA, actsFor), [PC]);
-  // Each account's keys are its own: Alice's unfollow leaves Bob's, which still counts.
-  assert.ok(submit(ALICE, await records.unfollow(state, ALICE, PA, PC)));
-  assert.ok(await records.follows(state, PA, PC, actsFor));
+  const { owners } = moniker();
+  assert.ok(submit(ALICE, await records.follow(state, ALICE, "ada_2", "bob")));
+  assert.deepEqual(await records.followers(state, "bob", owners), ["ada_2"]);
+  assert.ok(!(await records.follows(state, "ada", "bob", owners)));
 });
 
-test("an admin follows as the profile, until it is no longer one", async () => {
+test("a follow lapses when its handle is sold, and the handle's followers stay", async () => {
   const { state, submit } = chain();
-  const { acting, actsFor } = moniker();
-  acting.set(PA, [ALICE, CAROL]);
-  assert.ok(submit(CAROL, await records.follow(state, CAROL, PA, PB)));
-  assert.deepEqual(await records.followers(state, PB, actsFor), [PA]);
-  acting.set(PA, [ALICE]);
-  assert.deepEqual(await records.followers(state, PB, actsFor), []);
+  const { owner, owners } = moniker();
+  assert.ok(submit(ALICE, await records.follow(state, ALICE, "ada", "bob")));
+  assert.ok(submit(CAROL, await records.follow(state, CAROL, "cara", "ada")));
+  owner.set("ada", BOB); // Alice sold @ada to Bob
+  assert.ok(!(await records.follows(state, "ada", "bob", owners)));
+  assert.deepEqual(await records.following(state, "ada", owners), []);
+  assert.deepEqual(await records.followers(state, "bob", owners), []);
+  // Who followed @ada still does: a follow is of the handle, whoever owns it.
+  assert.deepEqual(await records.followers(state, "ada", owners), ["cara"]);
+  // The new owner starts fresh, with keys of its own.
+  assert.ok(submit(BOB, await records.follow(state, BOB, "ada", "cara")));
+  assert.deepEqual(await records.following(state, "ada", owners), ["cara"]);
+  // Bought back, Alice's old follow counts again: it is still hers.
+  owner.set("ada", ALICE);
+  assert.deepEqual(await records.following(state, "ada", owners), ["bob"]);
 });
 
-test("a follow lapses when its profile changes hands; the new owner writes their own", async () => {
+test("a handle no one owns follows no one", async () => {
   const { state, submit } = chain();
-  const { acting, actsFor } = moniker();
-  assert.ok(submit(ALICE, await records.follow(state, ALICE, PA, PB)));
-  acting.set(PA, [CAROL]); // Alice sold the profile to Carol
-  assert.ok(!(await records.follows(state, PA, PB, actsFor)));
-  assert.deepEqual(await records.followers(state, PB, actsFor), []);
-  assert.deepEqual(await records.following(state, PA, actsFor), []);
-  assert.ok(submit(CAROL, await records.follow(state, CAROL, PA, PB)));
-  assert.deepEqual(await records.followers(state, PB, actsFor), [PA]);
+  const { owner, owners } = moniker();
+  assert.ok(submit(ALICE, await records.follow(state, ALICE, "ada", "bob")));
+  owner.delete("ada"); // released
+  assert.deepEqual(await records.followers(state, "bob", owners), []);
+  assert.ok(!(await records.follows(state, "ada", "bob", owners)));
+});
+
+test("Moniker's name values: the owner, priced or offered, or nothing", () => {
+  assert.equal(records.ownerIn(ALICE), ALICE);
+  assert.equal(records.ownerIn(`${ALICE}@500`), ALICE);
+  assert.equal(records.ownerIn(`${ALICE}>${BOB}`), ALICE);
+  for (const value of [undefined, "", "alice", `x${ALICE}`, 7]) assert.equal(records.ownerIn(value), undefined, String(value));
 });
 
 test("unfollow deletes both of the account's keys; repeats write nothing", async () => {
   const { state, submit, map } = chain();
-  const { actsFor } = moniker();
-  assert.ok(submit(ALICE, await records.follow(state, ALICE, PA, PB)));
-  assert.deepEqual([...map.keys()].sort(), [`followers/${PB}/${PA}/${ALICE}`, `follows/${PA}/${PB}/${ALICE}`]);
-  assert.deepEqual(await records.follow(state, ALICE, PA, PB), { actions: [] });
-  assert.ok(submit(ALICE, await records.unfollow(state, ALICE, PA, PB)));
-  assert.deepEqual(await records.following(state, PA, actsFor), []);
+  const { owners } = moniker();
+  assert.ok(submit(ALICE, await records.follow(state, ALICE, "ada", "bob")));
+  assert.deepEqual([...map.keys()].sort(), [`followers/bob/ada/${ALICE}`, `follows/ada/bob/${ALICE}`]);
+  assert.deepEqual(await records.follow(state, ALICE, "ada", "bob"), { actions: [] });
+  assert.ok(submit(ALICE, await records.unfollow(state, ALICE, "ada", "bob")));
+  assert.deepEqual(await records.following(state, "ada", owners), []);
   assert.equal(map.size, 0);
-  assert.deepEqual(await records.unfollow(state, ALICE, PA, PB), { actions: [] });
+  assert.deepEqual(await records.unfollow(state, ALICE, "ada", "bob"), { actions: [] });
 });
 
 test("an account's keys are its own", async () => {
   const { state, submit } = chain();
-  const { actsFor } = moniker();
+  const { owners } = moniker();
   // Bob signs a write of Alice's keys.
-  assert.ok(!submit(BOB, await records.follow(state, ALICE, PA, PB)));
-  assert.ok(submit(ALICE, await records.follow(state, ALICE, PA, PB)));
-  assert.ok(!submit(BOB, await records.unfollow(state, ALICE, PA, PB)));
-  assert.deepEqual(await records.followers(state, PB, actsFor), [PA]);
-  // Keys Bob writes for a profile he doesn't act for are kept by the chain, and counted by no reader.
-  assert.ok(submit(BOB, await records.follow(state, BOB, PC, PB)));
-  assert.deepEqual(await records.followers(state, PB, actsFor), [PA]);
+  assert.ok(!submit(BOB, await records.follow(state, ALICE, "ada", "bob")));
+  assert.ok(submit(ALICE, await records.follow(state, ALICE, "ada", "bob")));
+  assert.ok(!submit(BOB, await records.unfollow(state, ALICE, "ada", "bob")));
+  assert.deepEqual(await records.followers(state, "bob", owners), ["ada"]);
+  // Keys Bob writes as a handle he doesn't own are kept by the chain, and counted by no reader.
+  assert.ok(submit(BOB, await records.follow(state, BOB, "cara", "bob")));
+  assert.deepEqual(await records.followers(state, "bob", owners), ["ada"]);
 });
 
-test("only profiles follow profiles", async () => {
-  for (const neither of ["Bob", "@bob", "bob", BOB, "aaaaaaaaaaaaaaa1", ""]) {
-    await assert.rejects(records.follow(chain().state, ALICE, PA, neither), /not a profile/, neither);
-    await assert.rejects(records.follow(chain().state, ALICE, neither, PA), /not a profile/, neither);
+test("only handles follow handles", async () => {
+  for (const neither of ["Bob", "@bob", "bo b", "bob/x", BOB.slice(0, 7).toUpperCase(), ""]) {
+    await assert.rejects(records.follow(chain().state, ALICE, "ada", neither), /not a handle/, neither);
+    await assert.rejects(records.follow(chain().state, ALICE, neither, "ada"), /not a handle/, neither);
   }
-  assert.ok(records.isProfileId(PA2));
-  assert.ok(!records.isProfileId(BOB));
+  assert.ok(records.isHandle("ada_2"));
+  assert.ok(!records.isHandle("@ada"));
 });
 
 test("a follow or unfollow waiting for a block is found in transaction bodies", () => {
-  const follow = { signers: [ALICE], actions: [{ key: records.followKey(PA, PB, ALICE), newValue: "1" }, { key: records.followerKey(PA, PB, ALICE), newValue: "1" }] };
-  const unfollow = { signers: [ALICE], actions: [{ key: records.followKey(PA2, PC, ALICE), oldValue: "1" }, { key: records.followerKey(PA2, PC, ALICE), oldValue: "1" }] };
-  const others = { signers: [BOB], actions: [{ key: records.followKey(PB, PA, BOB), newValue: "1" }] };
-  assert.deepEqual(records.pendingIn([follow, unfollow, others, undefined, {}], ALICE), { [`${PA}/${PB}`]: true, [`${PA2}/${PC}`]: false });
+  const follow = { signers: [ALICE], actions: [{ key: records.followKey("ada", "bob", ALICE), newValue: "1" }, { key: records.followerKey("ada", "bob", ALICE), newValue: "1" }] };
+  const unfollow = { signers: [ALICE], actions: [{ key: records.followKey("ada_2", "cara", ALICE), oldValue: "1" }, { key: records.followerKey("ada_2", "cara", ALICE), oldValue: "1" }] };
+  const others = { signers: [BOB], actions: [{ key: records.followKey("bob", "ada", BOB), newValue: "1" }] };
+  assert.deepEqual(records.pendingIn([follow, unfollow, others, undefined, {}], ALICE), { "ada/bob": true, "ada_2/cara": false });
   assert.deepEqual(records.pendingIn([others], ALICE), {});
   // Malformed bodies are skipped, not fatal: a signer string that merely contains the address, odd actions, another account's key.
   const odd = [
     { signers: `x${ALICE}x`, actions: follow.actions },
     { signers: [ALICE], actions: "nope" },
-    { signers: [ALICE, BOB], actions: [null, { key: 7 }, { key: records.followKey(PB, PC, BOB), newValue: "1" }, { key: `${records.followKey(PA, PC, ALICE)}/x`, newValue: "1" }, { key: records.followKey(PC, PA, ALICE), newValue: "1" }] },
+    { signers: [ALICE, BOB], actions: [null, { key: 7 }, { key: records.followKey("bob", "cara", BOB), newValue: "1" }, { key: `${records.followKey("ada", "cara", ALICE)}/x`, newValue: "1" }, { key: records.followKey("cara", "ada", ALICE), newValue: "1" }] },
   ];
-  assert.deepEqual(records.pendingIn(odd, ALICE), { [`${PC}/${PA}`]: true });
+  assert.deepEqual(records.pendingIn(odd, ALICE), { "cara/ada": true });
 });

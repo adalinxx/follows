@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createFollows, DEFAULTS, isAddress, isProfileId } from "../src/index.mjs";
+import { createFollows, DEFAULTS, isAddress, isHandle } from "../src/index.mjs";
 
 // Enough of the Lattice SDK for createFollows to start; nothing here reads a node.
 const sdk = { VolumeClient: class {}, HTTPVolumeTransport: class {}, decodeDagCbor: () => undefined };
 const address = "bafyreibc6ggvvnkjlyjghue3qxnagcoprbsh725cutnnnkt3t6dambbt6a";
-// Enough of a Moniker client: Alice acts for no profile.
-const moniker = { actsFor: async () => false };
+const other = "bafyreibc6ggvvnkjlyjghue3qxnagcoprbsh725cutnnnkt3t6dambbt6a".replace(/a$/, "e");
+// Enough of a Moniker client: @ada is owned by another account; the reads asked of it are kept.
+const asked = [];
+const moniker = { state: async () => ({ get: async (key) => (asked.push(key), key === "name/ada" ? `${other}@5` : undefined) }), names: async () => [] };
 
 test("needs the SDK and Moniker", () => {
   assert.throws(() => createFollows({ moniker }), /needs \{ sdk \}/);
@@ -19,18 +21,22 @@ test("defaults to the testnet trial chain and its shared hosts", () => {
   assert.deepEqual(graph.nodes, DEFAULTS.nodes);
 });
 
-test("writes need a wallet, and a profile the account acts for", async () => {
-  const [p, t] = ["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb"];
-  await assert.rejects(createFollows({ sdk, moniker }).follow(p, t, { wallet: undefined }), /Lattice wallet/);
+test("writes need a wallet, and a handle the account owns", async () => {
+  await assert.rejects(createFollows({ sdk, moniker }).follow("@ada", "@bob", { wallet: undefined }), /Lattice wallet/);
   const wallet = { address: async () => address, writeRecords: async () => assert.fail("sent") };
-  await assert.rejects(createFollows({ sdk, moniker }).follow(p, t, { wallet }), /isn't yours/);
+  asked.length = 0;
+  await assert.rejects(createFollows({ sdk, moniker }).follow("@ada", "bob", { wallet }), /@ada isn't yours/);
+  assert.deepEqual(asked, ["name/ada"]);
+  await assert.rejects(createFollows({ sdk, moniker }).follow("nobody", "bob", { wallet }), /@nobody isn't yours/);
 });
 
-test("checks addresses and profile ids", () => {
+test("checks addresses and handles", () => {
   assert.ok(isAddress(address));
   assert.ok(!isAddress("bafyrei"));
-  assert.ok(isProfileId("abcdefghij234567"));
-  assert.ok(!isProfileId("abcdefghij23456"));
-  assert.ok(!isProfileId("abcdefghij234561"));
-  assert.ok(!isProfileId(address));
+  assert.ok(isAddress(other));
+  assert.ok(isHandle("ada_1"));
+  assert.ok(!isHandle("@ada"));
+  assert.ok(!isHandle("Ada"));
+  assert.ok(!isHandle(""));
+  assert.ok(!isHandle(address.slice(0, 7) + "/x"));
 });

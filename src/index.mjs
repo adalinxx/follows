@@ -1,16 +1,15 @@
 // Follows for any app: one follow graph every Lattice app shares, so a
 // person's audience comes with them instead of starting at zero in each app.
-// A profile follows a profile: Moniker profiles, by id. An app resolves a
-// @name to its profile through Moniker first.
+// A handle follows a handle: Moniker names, which accounts own.
 //
 //   const graph = createFollows({ sdk, moniker });      // sdk: the Lattice SDK module; moniker: createMoniker(…)
-//   const ids = await graph.following(p);              // the profiles p follows
-//   const fans = await graph.followers(t);             // the profiles following t
-//   await graph.follow(p, t, { wallet: window.lattice });
+//   const hs = await graph.following("@ada");          // the handles @ada follows
+//   const fans = await graph.followers("@bob");        // the handles following @bob
+//   await graph.follow("@ada", "@bob", { wallet: window.lattice });
 //
-// A follow counts while the account that wrote it acts for the following
-// profile on Moniker now (owns it, or is its admin): when a profile changes
-// hands, the old owner's follows lapse.
+// A follow counts only while the account that wrote it owns the following
+// handle on Moniker now: when a handle is sold, its old owner's follows
+// lapse, and its followers stay.
 //
 // Reads go to the first of `nodes` that answers and are checked by CID, so
 // they do not depend on trusting that node. Writes go to the wallet, which
@@ -18,6 +17,8 @@
 import * as records from "./records/follows.mjs";
 import { anyHost, tip, view, volumeLoader } from "./records/state.mjs";
 import { writeRequest } from "./records/wallet.mjs";
+
+const { bare } = records;
 
 /** Where Follows lives now: its testnet trial chain and the shared hosts. */
 export const DEFAULTS = {
@@ -33,7 +34,11 @@ export function createFollows(options) {
   const { sdk, moniker, chain, nodes, fee, freshFor } = { ...DEFAULTS, ...options };
   if (!sdk) throw new Error("createFollows needs { sdk }: the Lattice SDK module");
   if (!moniker) throw new Error("createFollows needs { moniker }: createMoniker from moniker-sdk");
-  const actsFor = (account, p) => moniker.actsFor(account, p);
+  /** Each handle's owner on Moniker now, or undefined: one `name/<h>` read each, from one state. */
+  const owners = async (handles, { fresh = false } = {}) => {
+    const names = await moniker.state({ fresh });
+    return Promise.all(handles.map(async (h) => records.ownerIn(await names.get(`name/${h}`))));
+  };
   const volumes = new sdk.VolumeClient(anyHost(nodes.map((node) => new sdk.HTTPVolumeTransport(`${node}/volumes`, { chainPath: chain }))));
   const load = volumeLoader(volumes, sdk.decodeDagCbor);
 
@@ -72,15 +77,23 @@ export function createFollows(options) {
     state,
     moniker,
 
-    /** The profiles profile `p` follows. */
-    following: async (p) => records.following(await state(), p, actsFor),
-    /** The profiles that follow profile `t`, each once. */
-    followers: async (t) => records.followers(await state(), t, actsFor),
-    /** Whether profile `p` follows profile `t`. */
-    follows: async (p, t) => records.follows(await state(), p, t, actsFor),
+    /** The handles `@h` follows, bare, in order. */
+    following: async (h) => records.following(await state(), bare(h), owners),
+    /** The handles that follow `@t`, bare, in order, each once. */
+    followers: async (t) => records.followers(await state(), bare(t), owners),
+    /** How many handles follow `@h`, and how many it follows: `{ followers, following }`. */
+    counts: async (h) => {
+      const s = await state();
+      const [followers, following] = await Promise.all([records.followers(s, bare(h), owners), records.following(s, bare(h), owners)]);
+      return { followers: followers.length, following: following.length };
+    },
+    /** Whether `@h` follows `@t`. */
+    follows: async (h, t) => records.follows(await state(), bare(h), bare(t), owners),
+    /** The handles an account owns on Moniker, bare: the ones it may follow as. */
+    handlesOf: async (address) => (await moniker.names(address)).map((name) => name.handle),
     /**
      * What `account` is saving now: follows (`true`) and unfollows (`false`)
-     * waiting in the first answering node's mempool, by `"<p>/<t>"`.
+     * waiting in the first answering node's mempool, by `"<h>/<t>"`.
      */
     pending: async (account) => {
       for (const node of nodes) {
@@ -112,20 +125,21 @@ export function createFollows(options) {
     },
 
     /**
-     * Profile `p` follows profile `t`, written by the connected account, which
-     * must act for `p`. Resolves to undefined when its follow is there already.
+     * `@h` follows `@t`, written by the connected account, which must own `@h`
+     * on Moniker. Resolves to undefined when its follow is there already.
      */
-    follow: async (p, t, { wallet }) => {
+    follow: async (h, t, { wallet }) => {
       const account = await me(wallet);
-      if (!(await actsFor(account, p))) throw new Error("That profile isn't yours");
-      return send(wallet, await records.follow(await state({ fresh: true }), account, p, t));
+      const [owner] = await owners([bare(h)], { fresh: true });
+      if (owner !== account) throw new Error(`@${bare(h)} isn't yours`);
+      return send(wallet, await records.follow(await state({ fresh: true }), account, bare(h), bare(t)));
     },
-    /** The connected account's follow of `t` as `p` is deleted. Resolves to undefined when there was none. */
-    unfollow: async (p, t, { wallet }) => {
+    /** The connected account's follow of `@t` as `@h` is deleted. Resolves to undefined when there was none. */
+    unfollow: async (h, t, { wallet }) => {
       const account = await me(wallet);
-      return send(wallet, await records.unfollow(await state({ fresh: true }), account, p, t));
+      return send(wallet, await records.unfollow(await state({ fresh: true }), account, bare(h), bare(t)));
     },
   };
 }
 
-export const { isAddress, isProfileId } = records;
+export const { isAddress, isHandle } = records;

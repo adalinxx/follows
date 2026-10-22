@@ -1,15 +1,14 @@
-// <follows-button target="<profile id>"> for any page: Follow / Following
-// for a profile, followed by a profile of the account connected in the
-// person's Selfhold wallet. Register it once with a graph from createFollows:
+// <follows-button target="@ada"> for any page: Follow / Following for a
+// handle, followed by a handle of the account connected in the person's
+// Selfhold wallet. Register it once with a graph from createFollows:
 //
 //   defineFollowButton(graph);
-//   <follows-button target="abcdefghij234567" label="Ada Lovelace"></follows-button>
+//   <follows-button target="@ada"></follows-button>
 //
-// It says what it follows: "Follow @ada" when the profile shows a name, else
-// "Follow", with `label` naming the profile for screen readers. The follower
-// is the account's profile on Moniker; with several, a picker beside the
-// button says which ("as @ada"), remembered in this browser; with none, the
-// note says how to make one. It hides on the account's own profiles.
+// It says what it follows: "Follow @ada". The follower is one of the
+// account's handles on Moniker; with several, a picker beside the button says
+// which ("as @bob"), remembered in this browser; with none, the note says to
+// get one on Moniker first. It hides on the account's own handles.
 //
 // A follow takes about a block to save: the button shows the new state at
 // once, and its note says it is saving until the chain shows it, then
@@ -83,13 +82,12 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
   customElements.define(
     tag,
     class extends HTMLElement {
-      static observedAttributes = ["target", "label"];
+      static observedAttributes = ["target"];
       #drawn = 0;
       #state = "loading"; // loading | follow | following | saving
       #want = true;
-      #handle; // the name the target shows, if any
-      #mine = null; // the connected account's profiles, once read
-      #as; // the profile that follows
+      #mine = null; // the connected account's handles, once read
+      #as; // the handle that follows
       #button;
       #now;
       #picker;
@@ -120,27 +118,26 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         if (this.isConnected) this.#read();
       }
       get #target() {
-        return this.getAttribute("target") ?? "";
+        return (this.getAttribute("target") ?? "").replace(/^@/, "");
       }
       #show(state, note = "") {
         this.#state = state;
         // While saving, the button already shows where it is going; the note says it is saving.
         const on = state === "following" || (state === "saving" && this.#want);
-        const shown = this.#handle ? ` @${this.#handle}` : "";
-        const label = this.#handle ? "" : this.getAttribute("label");
+        const shown = ` @${this.#target}`;
         const verb = on ? "Following" : "Follow";
         this.#now.textContent = state === "loading" ? "" : `${verb}${shown}`;
         this.#button.className = `${on ? "on" : ""} ${state === "following" ? "ready" : ""} ${state === "saving" ? "saving" : ""}`;
         this.#button.dataset.unfollow = `Unfollow${shown}`;
         // The name read out begins with the words shown (WCAG 2.5.3).
-        this.#button.setAttribute("aria-label", `${verb}${shown}${label ? `, ${label}` : ""}`);
+        this.#button.setAttribute("aria-label", `${verb}${shown}`);
         // Never disabled: a disabled button drops keyboard focus.
         this.#button.setAttribute("aria-disabled", String(state === "loading" || state === "saving"));
         this.#button.toggleAttribute("aria-busy", state === "loading");
         this.#note.innerHTML = note;
       }
       /**
-       * Whether the connected account's profile follows the target, if a
+       * Whether the connected account's handle follows the target, if a
        * wallet says which account that is, and whether a change to it is
        * still saving.
        */
@@ -150,9 +147,8 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         this.#show("loading");
         try {
           const target = this.#target;
-          const [me, shows] = await Promise.all([wallet()?.address?.(), graph.moniker.profile(target).then((p) => p?.handle, () => undefined)]);
+          const me = await wallet()?.address?.();
           if (ticket !== this.#drawn) return;
-          this.#handle = shows;
           if (me && !(await this.#follower(me))) return;
           if (ticket !== this.#drawn) return;
           const as = this.#as;
@@ -172,23 +168,22 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         }
       }
       /**
-       * Which of `me`'s profiles follows: its one, or the one chosen in the
-       * picker. False when the button hides, on one of `me`'s own profiles.
+       * Which of `me`'s handles follows: its one, or the one chosen in the
+       * picker. False when the button hides, on one of `me`'s own handles.
        */
       async #follower(me) {
-        const mine = await graph.moniker.profilesOf(me);
+        const mine = await graph.handlesOf(me);
         this.#mine = mine;
-        // Nobody follows themselves here: hidden on your own profiles.
-        if (mine.some((p) => p.id === this.#target)) {
+        // Nobody follows themselves here: hidden on your own handles.
+        if (mine.includes(this.#target)) {
           this.hidden = true;
           return false;
         }
-        const ids = mine.map((p) => p.id);
-        const picked = [this.#picker.value, chosen()].find((p) => ids.includes(p));
-        this.#as = picked ?? ids[0];
+        const picked = [this.#picker.value, chosen()].find((h) => mine.includes(h));
+        this.#as = picked ?? mine[0];
         this.#picker.hidden = mine.length < 2;
         this.#picker.replaceChildren(
-          ...mine.map((p) => Object.assign(document.createElement("option"), { value: p.id, textContent: `as ${graph.moniker.label(p)}${p.name && p.handle ? ` · @${p.handle}` : ""}`, selected: p.id === this.#as })),
+          ...mine.map((h) => Object.assign(document.createElement("option"), { value: h, textContent: `as @${h}`, selected: h === this.#as })),
         );
         return true;
       }
@@ -242,19 +237,21 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         try {
           // Selfhold answers connect only within a click: ask before any other wait.
           const me = (await wallet().address?.()) ?? (await wallet().connect());
-          // Connected only now: which profile follows is not known yet.
+          // Connected only now: which handle follows is not known yet.
           const known = this.#mine !== null;
           if (!known && !(await this.#follower(me))) return;
           if (ticket !== this.#drawn) return;
           if (!this.#as) {
+            // Read again on the next press: a handle may be got meanwhile.
+            this.#mine = null;
             // On Moniker itself, the link stays on the page.
             this.#show(before, monikerURL.startsWith("#")
-              ? `To follow, <a href="${escape(monikerURL)}">make a profile</a> first.`
-              : `To follow, make a profile on <a href="${escape(monikerURL)}" target="_blank" rel="noopener">Moniker</a>, then reload this page.`);
+              ? `To follow, <a href="${escape(monikerURL)}">get a handle</a> first.`
+              : `To follow, get a handle on <a href="${escape(monikerURL)}" target="_blank" rel="noopener">Moniker</a> first.`);
             return;
           }
           if (!known && this.#mine.length > 1) {
-            this.#show(before, "Choose which profile follows, then press Follow.");
+            this.#show(before, "Choose which handle follows, then press Follow.");
             return;
           }
           const as = this.#as;
