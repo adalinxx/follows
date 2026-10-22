@@ -1,14 +1,16 @@
 // Follows for any app: one follow graph every Lattice app shares, so a
 // person's audience comes with them instead of starting at zero in each app.
-// An account follows accounts and names. Following an address follows that
-// account wherever its names go; following a name (a Moniker handle, "@ada")
-// follows whoever holds it now, so the name's followers go with it.
+// A profile follows a profile: Moniker profiles, by id. An app resolves a
+// @name to its profile through Moniker first.
 //
-//   const graph = createFollows({ sdk });               // sdk: the Lattice SDK module
-//   const targets = await graph.following(address);    // ["@ada", "bafyrei…", …]
-//   const audience = await graph.followers("@ada");    // the accounts following the name
-//   const fans = await graph.followers(address);       // the accounts following the account
-//   await graph.follow("@ada", { wallet: window.lattice });
+//   const graph = createFollows({ sdk, moniker });      // sdk: the Lattice SDK module; moniker: createMoniker(…)
+//   const ids = await graph.following(p);              // the profiles p follows
+//   const fans = await graph.followers(t);             // the profiles following t
+//   await graph.follow(p, t, { wallet: window.lattice });
+//
+// A follow counts while the account that wrote it acts for the following
+// profile on Moniker now (owns it, or is its admin): when a profile changes
+// hands, the old owner's follows lapse.
 //
 // Reads go to the first of `nodes` that answers and are checked by CID, so
 // they do not depend on trusting that node. Writes go to the wallet, which
@@ -19,7 +21,7 @@ import { writeRequest } from "./records/wallet.mjs";
 
 /** Where Follows lives now: its testnet trial chain and the shared hosts. */
 export const DEFAULTS = {
-  chain: ["Nexus", "testnet", "follows-6ed91a"],
+  chain: ["Nexus", "testnet", "follows-a8fa7f"],
   nodes: ["https://lattice-testnet-apps-iad.fly.dev", "https://lattice-testnet-apps-ams.fly.dev"],
   // The trial chain's hosts admit 0-fee transactions: writes are free.
   fee: 0n,
@@ -28,8 +30,10 @@ export const DEFAULTS = {
 };
 
 export function createFollows(options) {
-  const { sdk, chain, nodes, fee, freshFor } = { ...DEFAULTS, ...options };
+  const { sdk, moniker, chain, nodes, fee, freshFor } = { ...DEFAULTS, ...options };
   if (!sdk) throw new Error("createFollows needs { sdk }: the Lattice SDK module");
+  if (!moniker) throw new Error("createFollows needs { moniker }: createMoniker from moniker-sdk");
+  const actsFor = (account, p) => moniker.actsFor(account, p);
   const volumes = new sdk.VolumeClient(anyHost(nodes.map((node) => new sdk.HTTPVolumeTransport(`${node}/volumes`, { chainPath: chain }))));
   const load = volumeLoader(volumes, sdk.decodeDagCbor);
 
@@ -66,18 +70,19 @@ export function createFollows(options) {
     chain,
     nodes,
     state,
+    moniker,
 
-    /** What account `address` follows: `@` names and addresses. */
-    following: async (address) => records.following(await state(), address),
-    /** The accounts that follow `followed`: an address, or a name ("@ada", or "ada"). */
-    followers: async (followed) => records.followers(await state(), followed),
-    /** Whether account `follower` follows `followed`. */
-    follows: async (follower, followed) => records.follows(await state(), follower, followed),
+    /** The profiles profile `p` follows. */
+    following: async (p) => records.following(await state(), p, actsFor),
+    /** The profiles that follow profile `t`, each once. */
+    followers: async (t) => records.followers(await state(), t, actsFor),
+    /** Whether profile `p` follows profile `t`. */
+    follows: async (p, t) => records.follows(await state(), p, t, actsFor),
     /**
-     * What account `follower` is saving now: follows (`true`) and unfollows
-     * (`false`) waiting in the first answering node's mempool, by target.
+     * What `account` is saving now: follows (`true`) and unfollows (`false`)
+     * waiting in the first answering node's mempool, by `"<p>/<t>"`.
      */
-    pending: async (follower) => {
+    pending: async (account) => {
       for (const node of nodes) {
         try {
           const url = new URL("/api/mempool", node);
@@ -100,23 +105,27 @@ export function createFollows(options) {
               }
             }),
           );
-          return records.pendingIn(bodies, follower);
+          return records.pendingIn(bodies, account);
         } catch {}
       }
       return {};
     },
 
-    /** The connected account follows `followed`, an address or a name. Resolves to undefined when it already does. */
-    follow: async (followed, { wallet }) => {
-      const follower = await me(wallet);
-      return send(wallet, await records.follow(await state({ fresh: true }), follower, followed));
+    /**
+     * Profile `p` follows profile `t`, written by the connected account, which
+     * must act for `p`. Resolves to undefined when its follow is there already.
+     */
+    follow: async (p, t, { wallet }) => {
+      const account = await me(wallet);
+      if (!(await actsFor(account, p))) throw new Error("That profile isn't yours");
+      return send(wallet, await records.follow(await state({ fresh: true }), account, p, t));
     },
-    /** The connected account stops following `followed`. Resolves to undefined when it did not. */
-    unfollow: async (followed, { wallet }) => {
-      const follower = await me(wallet);
-      return send(wallet, await records.unfollow(await state({ fresh: true }), follower, followed));
+    /** The connected account's follow of `t` as `p` is deleted. Resolves to undefined when there was none. */
+    unfollow: async (p, t, { wallet }) => {
+      const account = await me(wallet);
+      return send(wallet, await records.unfollow(await state({ fresh: true }), account, p, t));
     },
   };
 }
 
-export const { isAddress, isHandle, isName } = records;
+export const { isAddress, isProfileId } = records;

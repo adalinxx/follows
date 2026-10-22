@@ -1,28 +1,29 @@
-// <follows-button target="@ada"> for any page: Follow / Following for the
-// account connected in the person's Selfhold wallet. A target is a name
-// (`@ada`: whoever owns it) or an account address. Register it once with a
-// graph from createFollows:
+// <follows-button target="<profile id>"> for any page: Follow / Following
+// for a profile, followed by a profile of the account connected in the
+// person's Selfhold wallet. Register it once with a graph from createFollows:
 //
 //   defineFollowButton(graph);
-//   <follows-button target="@ada" owner="bafyrei…"></follows-button>
-//   <follows-button target="bafyrei…" label="Ada Lovelace"></follows-button>
+//   <follows-button target="abcdefghij234567" label="Ada Lovelace"></follows-button>
 //
-// It says what it follows: "Follow @ada" on a name, "Follow account" on an
-// account, with `label` naming the account for screen readers.
-// `owner` (the name's owner) hides it on your own name, as on your account.
+// It says what it follows: "Follow @ada" when the profile shows a name, else
+// "Follow", with `label` naming the profile for screen readers. The follower
+// is the account's profile on Moniker; with several, a picker beside the
+// button says which ("as @ada"), remembered in this browser; with none, the
+// note says how to make one. It hides on the account's own profiles.
 //
 // A follow takes about a block to save: the button shows the new state at
 // once, and its note says it is saving until the chain shows it, then
-// "Saved."; then it fires `follows:change` ({ target, following }). One still
-// waiting in a node's mempool, sent from this page or anywhere else, shows as
-// saving too. With no wallet it fires `follows:needs-wallet` ({ target }); a
-// page that handles it (preventDefault) shows its own help, else the button
-// says how to get one.
+// "Saved."; then it fires `follows:change` ({ target, as, following }). One
+// still waiting in a node's mempool, sent from this page or anywhere else,
+// shows as saving too. With no wallet it fires `follows:needs-wallet`
+// ({ target }); a page that handles it (preventDefault) shows its own help,
+// else the button says how to get one.
 // Style it from outside with --follows-accent, --follows-accent-ink,
 // --follows-ink, --follows-line, --follows-muted, --follows-width and
 // --follows-note-align.
 
 const WALLET_URL = "https://chromewebstore.google.com/detail/amcobhbipbblfjonmoiicihhfglkhpce";
+const MONIKER_URL = "https://app.moniker.bio/";
 const SAVING = "Saving… about a minute.";
 const phone = () => /Android|iPhone|iPad|iPod|Mobile/i.test(globalThis.navigator?.userAgent ?? "");
 
@@ -44,6 +45,9 @@ const style = `
     button.on.ready:hover::after { content: attr(data-unfollow); }
     button.on.ready:hover { border-color: currentColor; }
   }
+  select { box-sizing: border-box; width: 100%; min-height: 44px; padding: 0 12px; border-radius: 8px; font: inherit;
+    border: 1px solid var(--follows-line, #c9ccd4); background: transparent; color: var(--follows-ink, inherit); }
+  select:focus-visible { outline: 2px solid var(--follows-accent, #3346D3); outline-offset: 2px; }
   .note { text-align: var(--follows-note-align, center); font-size: 0.85em; line-height: 1.35; color: var(--follows-muted, #5f6470); }
   .note a { color: inherit; }
   .note:empty { display: none; }
@@ -59,18 +63,36 @@ function problem(error) {
   return "Couldn't save. Try again.";
 }
 
-export function defineFollowButton(graph, { tag = "follows-button", walletURL = WALLET_URL, wallet = () => globalThis.lattice } = {}) {
+/** The follower last chosen in this browser, where there is one. */
+function chosen() {
+  try {
+    return localStorage.getItem("follows.as");
+  } catch {
+    return null;
+  }
+}
+function choose(p) {
+  try {
+    localStorage.setItem("follows.as", p);
+  } catch {}
+}
+
+export function defineFollowButton(graph, { tag = "follows-button", walletURL = WALLET_URL, monikerURL = MONIKER_URL, wallet = () => globalThis.lattice } = {}) {
   if (customElements.get(tag)) return;
 
   customElements.define(
     tag,
     class extends HTMLElement {
-      static observedAttributes = ["target", "label", "owner"];
+      static observedAttributes = ["target", "label"];
       #drawn = 0;
       #state = "loading"; // loading | follow | following | saving
       #want = true;
+      #handle; // the name the target shows, if any
+      #mine = null; // the connected account's profiles, once read
+      #as; // the profile that follows
       #button;
       #now;
+      #picker;
       #note;
       constructor() {
         super();
@@ -79,10 +101,17 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         this.#button.type = "button";
         this.#now = Object.assign(document.createElement("span"), { className: "now" });
         this.#button.append(this.#now);
+        this.#picker = Object.assign(document.createElement("select"), { hidden: true });
+        this.#picker.setAttribute("aria-label", "Who follows");
         this.#note = Object.assign(document.createElement("span"), { className: "note" });
         this.#note.setAttribute("role", "status");
-        root.append(Object.assign(document.createElement("style"), { textContent: style }), this.#button, this.#note);
+        // Who follows comes first: it is chosen before Follow is pressed.
+        root.append(Object.assign(document.createElement("style"), { textContent: style }), this.#picker, this.#button, this.#note);
         this.#button.addEventListener("click", () => this.#press());
+        this.#picker.addEventListener("change", () => {
+          choose(this.#picker.value);
+          this.#read();
+        });
       }
       connectedCallback() {
         this.#read();
@@ -97,9 +126,8 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         this.#state = state;
         // While saving, the button already shows where it is going; the note says it is saving.
         const on = state === "following" || (state === "saving" && this.#want);
-        const target = this.#target;
-        const shown = target.startsWith("@") ? ` ${target}` : " account";
-        const label = target.startsWith("@") ? "" : this.getAttribute("label");
+        const shown = this.#handle ? ` @${this.#handle}` : "";
+        const label = this.#handle ? "" : this.getAttribute("label");
         const verb = on ? "Following" : "Follow";
         this.#now.textContent = state === "loading" ? "" : `${verb}${shown}`;
         this.#button.className = `${on ? "on" : ""} ${state === "following" ? "ready" : ""} ${state === "saving" ? "saving" : ""}`;
@@ -112,8 +140,9 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         this.#note.innerHTML = note;
       }
       /**
-       * Whether the connected account follows the target, if a wallet says
-       * which account that is, and whether a change to it is still saving.
+       * Whether the connected account's profile follows the target, if a
+       * wallet says which account that is, and whether a change to it is
+       * still saving.
        */
       async #read() {
         const ticket = ++this.#drawn;
@@ -121,34 +150,54 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         this.#show("loading");
         try {
           const target = this.#target;
-          const me = await wallet()?.address?.();
-          if (ticket !== this.#drawn || this.#self(me)) return;
-          const following = me ? await graph.follows(me, target) : false;
+          const [me, shows] = await Promise.all([wallet()?.address?.(), graph.moniker.profile(target).then((p) => p?.handle, () => undefined)]);
+          if (ticket !== this.#drawn) return;
+          this.#handle = shows;
+          if (me && !(await this.#follower(me))) return;
+          if (ticket !== this.#drawn) return;
+          const as = this.#as;
+          const following = as ? await graph.follows(as, target) : false;
           if (ticket !== this.#drawn) return;
           this.#show(following ? "following" : "follow");
-          if (!me) return;
+          if (!as) return;
           // Then, without holding the button, whether a change to it is still saving.
           const pending = await graph.pending(me).catch(() => ({}));
-          if (ticket !== this.#drawn || !(target in pending) || pending[target] === following) return;
-          this.#want = pending[target];
+          const key = `${as}/${target}`;
+          if (ticket !== this.#drawn || !(key in pending) || pending[key] === following) return;
+          this.#want = pending[key];
           this.#show("saving", SAVING);
-          await this.#landed(ticket, me, target);
+          await this.#landed(ticket, as, target);
         } catch {
           if (ticket === this.#drawn) this.#show("follow", "Couldn't check whether you follow. Reload to try again.");
         }
       }
-      /** Nobody follows themselves here: hidden on your own account and your own name. */
-      #self(me) {
-        if (!me || (me !== this.#target && me !== this.getAttribute("owner"))) return false;
-        this.hidden = true;
+      /**
+       * Which of `me`'s profiles follows: its one, or the one chosen in the
+       * picker. False when the button hides, on one of `me`'s own profiles.
+       */
+      async #follower(me) {
+        const mine = await graph.moniker.profilesOf(me);
+        this.#mine = mine;
+        // Nobody follows themselves here: hidden on your own profiles.
+        if (mine.some((p) => p.id === this.#target)) {
+          this.hidden = true;
+          return false;
+        }
+        const ids = mine.map((p) => p.id);
+        const picked = [this.#picker.value, chosen()].find((p) => ids.includes(p));
+        this.#as = picked ?? ids[0];
+        this.#picker.hidden = mine.length < 2;
+        this.#picker.replaceChildren(
+          ...mine.map((p) => Object.assign(document.createElement("option"), { value: p.id, textContent: `as ${graph.moniker.label(p)}${p.name && p.handle ? ` · @${p.handle}` : ""}`, selected: p.id === this.#as })),
+        );
         return true;
       }
       /** Waits until the chain shows the change this button is saving, then says so. */
-      async #landed(ticket, me, target) {
+      async #landed(ticket, as, target) {
         const started = Date.now();
         const landed = async () => {
           await graph.state({ fresh: true });
-          return (await graph.follows(me, target)) === this.#want;
+          return (await graph.follows(as, target)) === this.#want;
         };
         for (;;) {
           await new Promise((resolve) => setTimeout(resolve, 3000));
@@ -157,7 +206,8 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
           if (await landed().catch(() => false)) break;
           if (Date.now() - started < 3 * 60_000) continue;
           // Long enough to ask whether it is still on its way at all.
-          const waiting = await graph.pending(me).then((pending) => target in pending, () => true);
+          const me = await wallet()?.address?.();
+          const waiting = await graph.pending(me).then((pending) => `${as}/${target}` in pending, () => true);
           if (ticket !== this.#drawn) return;
           if (!waiting && !(await landed().catch(() => false))) {
             // Dropped before any block took it: back as it was, and free to try again.
@@ -172,7 +222,7 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         setTimeout(() => {
           if (ticket === this.#drawn && this.#note.textContent === "Saved.") this.#note.textContent = "";
         }, 4000);
-        this.dispatchEvent(new CustomEvent("follows:change", { bubbles: true, composed: true, detail: { target, following: this.#want } }));
+        this.dispatchEvent(new CustomEvent("follows:change", { bubbles: true, composed: true, detail: { target, as, following: this.#want } }));
       }
       async #press() {
         if (this.#state === "loading" || this.#state === "saving") return;
@@ -192,8 +242,23 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         try {
           // Selfhold answers connect only within a click: ask before any other wait.
           const me = (await wallet().address?.()) ?? (await wallet().connect());
-          if (this.#self(me)) return;
-          const sent = await (this.#want ? graph.follow(target, { wallet: wallet() }) : graph.unfollow(target, { wallet: wallet() }));
+          // Connected only now: which profile follows is not known yet.
+          const known = this.#mine !== null;
+          if (!known && !(await this.#follower(me))) return;
+          if (ticket !== this.#drawn) return;
+          if (!this.#as) {
+            // On Moniker itself, the link stays on the page.
+            this.#show(before, monikerURL.startsWith("#")
+              ? `To follow, <a href="${escape(monikerURL)}">make a profile</a> first.`
+              : `To follow, make a profile on <a href="${escape(monikerURL)}" target="_blank" rel="noopener">Moniker</a>, then reload this page.`);
+            return;
+          }
+          if (!known && this.#mine.length > 1) {
+            this.#show(before, "Choose which profile follows, then press Follow.");
+            return;
+          }
+          const as = this.#as;
+          const sent = await (this.#want ? graph.follow(as, target, { wallet: wallet() }) : graph.unfollow(as, target, { wallet: wallet() }));
           if (ticket !== this.#drawn) return;
           if (sent === undefined) {
             // Already as asked: nothing to save.
@@ -201,7 +266,7 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
             return;
           }
           this.#show("saving", SAVING);
-          await this.#landed(ticket, me, target);
+          await this.#landed(ticket, as, target);
         } catch (error) {
           if (ticket === this.#drawn) this.#show(before, problem(error));
         }

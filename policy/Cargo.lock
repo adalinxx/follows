@@ -12,4 +12,4 @@ dependencies = [
 [[package]]
 name = "lattice-policy-rules"
 version = "0.1.0"
-source = "git+https://github.com/adalinxx/moniker?rev=19155a2#19155a2f7a7d9cb8e4cdb5f43987d8cc39be760b"
+source = "git+https://github.com/adalinxx/moniker?rev=b5f52e0#b5f52e0aeb08992a5abad5e2b75c617971e71b37"
