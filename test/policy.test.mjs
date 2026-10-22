@@ -38,19 +38,19 @@ function accepts(actions, { signers = [ALICE], accountActions = [] } = {}) {
   return accepted;
 }
 
-// Profile ids: 16 characters of a–z and 2–7.
-const [P, Q, R] = ["aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbb2", "c7c7c7c7c7c7c7c7"];
+// Handles: Moniker names, lowercase letters, digits and `_`.
+const [P, Q, R] = ["alice", "bob_2", "c7"];
 const follow = (p, t, a) => `follows/${p}/${t}/${a}`;
 const follower = (p, t, a) => `followers/${t}/${p}/${a}`;
-/** Profile `p` following `t`, written by account `a`, as both keys, each with `change` ({ oldValue?, newValue? }). */
+/** Handle `p` following `t`, written by account `a`, as both keys, each with `change` ({ oldValue?, newValue? }). */
 const both = (p, t, a, change) => [{ key: follow(p, t, a), ...change }, { key: follower(p, t, a), ...change }];
 
-test("an account follows, refollows and unfollows as a profile, both keys at once", () => {
+test("an account follows, refollows and unfollows as a handle, both keys at once", () => {
   assert.ok(accepts(both(P, Q, ALICE, { newValue: "1" })));
   assert.ok(accepts(both(P, Q, ALICE, { oldValue: "1", newValue: "1" })));
   assert.ok(accepts(both(P, Q, ALICE, { oldValue: "1" })));
   assert.ok(accepts([...both(P, Q, ALICE, { newValue: "1" }), ...both(P, R, ALICE, { newValue: "1" })]));
-  // Any profile, owned by anyone: who acts for it is Moniker's business, checked by readers.
+  // Any handle, owned by anyone: who owns it is Moniker's business, checked by readers.
   assert.ok(accepts(both(Q, P, ALICE, { newValue: "1" })));
   assert.ok(accepts(both(P, P, ALICE, { newValue: "1" })));
 });
@@ -76,7 +76,7 @@ test("the twin comes directly after: not first, not after other follows", () => 
 test("the work grows with the transaction, no faster", () => {
   const time = (n) => {
     const actions = [];
-    for (let i = 0; i < n; i++) actions.push(...both(P, `${"q".repeat(12)}${String(i).padStart(4, "a").replace(/[0-9]/g, (d) => "abcdefghij"[d])}`, ALICE, { newValue: "1" }));
+    for (let i = 0; i < n; i++) actions.push(...both(P, `t${i}`, ALICE, { newValue: "1" }));
     const start = performance.now();
     assert.ok(accepts(actions));
     return performance.now() - start;
@@ -96,17 +96,25 @@ test("nobody writes or deletes another account's keys", () => {
   assert.ok(!accepts(both(P, Q, BOB, { newValue: "1" })));
   assert.ok(!accepts(both(P, Q, BOB, { oldValue: "1" })));
   assert.ok(!accepts([...both(P, Q, ALICE, { newValue: "1" }), ...both(Q, P, BOB, { newValue: "1" })]));
-  // Signed by both, each writes their own; and two accounts may each write for one profile.
+  // Signed by both, each writes their own; and two accounts may each write for one handle.
   assert.ok(accepts([...both(P, Q, ALICE, { newValue: "1" }), ...both(P, Q, BOB, { newValue: "1" })], { signers: [ALICE, BOB] }));
 });
 
-test("only a profile following a profile, by an account, is a record", () => {
-  for (const id of ["aaaaaaaaaaaaaaa", "aaaaaaaaaaaaaaaaa", "Aaaaaaaaaaaaaaaa", "aaaaaaaaaaaaaaa1", "aaaaaaaaaaaaaaa8", "aaaaaaaaaaaaaaa_", "@aaaaaaaaaaaaaaa", ALICE, ""]) {
+test("a handle of any length is a record; a profile id is just a handle", () => {
+  // No 16-character profile-id shape: short, long, any digit, underscores.
+  for (const id of ["a", "_", "0", "aaaaaaaaaaaaaaa1", "aaaaaaaaaaaaaaa8", "aaaaaaaaaaaaaaa_", "aaaaaaaaaaaaaaaaa", "x".repeat(300), "aaaaaaaaaaaaaaaa"]) {
+    assert.ok(accepts(both(id, Q, ALICE, { newValue: "1" })), `follower ${id}`);
+    assert.ok(accepts(both(P, id, ALICE, { newValue: "1" })), `followed ${id}`);
+  }
+});
+
+test("only a handle following a handle, by an account, is a record", () => {
+  for (const id of ["", "Alice", "ALICE", "al-ice", "-", "al.ice", "al ice", "alicé", "@alice", "al/ice", ALICE.toUpperCase()]) {
     assert.ok(!accepts(both(id, Q, ALICE, { newValue: "1" })), `follower ${id}`);
     assert.ok(!accepts(both(P, id, ALICE, { newValue: "1" })), `followed ${id}`);
   }
   // The account must be an address, and sign.
-  for (const a of ["alice", P, ALICE.toUpperCase(), `${ALICE}x`, ""]) assert.ok(!accepts(both(P, Q, a, { newValue: "1" }), { signers: [ALICE, a] }), a);
+  for (const a of ["alice", "abcdefghijklmnop", ALICE.toUpperCase(), `${ALICE}x`, ""]) assert.ok(!accepts(both(P, Q, a, { newValue: "1" }), { signers: [ALICE, a] }), a);
   for (const key of [
     `${follow(P, Q, ALICE)}/x`,
     `${follower(P, Q, ALICE)}/x`,
