@@ -1,25 +1,17 @@
 // The page's pure parts: what was typed into the search box, and which
-// profiles a filter keeps.
-import { isProfileId } from "../src/index.mjs";
+// handles a filter keeps.
+import { isHandle } from "../src/index.mjs";
 
-const HANDLE = /^[a-z0-9_]+$/;
-
-/**
- * Whom the search box names: `{ id }` for a profile id as typed, else
- * `{ handle }`, or null. A @ makes it a handle, even one shaped like an id.
- */
+/** The handle the search box names, `{ handle }`, with or without @, in any case; or null. */
 export function parseWho(text) {
-  const typed = String(text ?? "").trim();
-  if (isProfileId(typed)) return { id: typed };
-  const handle = typed.replace(/^@/, "").toLowerCase();
-  return HANDLE.test(handle) ? { handle } : null;
+  const handle = String(text ?? "").trim().replace(/^@/, "").toLowerCase();
+  return isHandle(handle) ? { handle } : null;
 }
 
-/** Whether a filter keeps a profile: its name, @handle or id contains the query. */
-export function matches(profile, query) {
+/** Whether a filter keeps a handle: it contains the query, ignoring case and @. */
+export function matches(handle, query) {
   const q = String(query ?? "").trim().toLowerCase().replace(/^@/, "");
-  if (q === "") return true;
-  return [profile.name, profile.handle, profile.id].some((field) => typeof field === "string" && field.toLowerCase().includes(q));
+  return q === "" || handle.includes(q);
 }
 
 /** `1 follower`, `2 followers`, `1,204 following`. */
