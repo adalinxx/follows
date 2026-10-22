@@ -21,7 +21,7 @@ import { writeRequest } from "./records/wallet.mjs";
 
 /** Where Follows lives now: its testnet trial chain and the shared hosts. */
 export const DEFAULTS = {
-  chain: ["Nexus", "testnet", "follows-f53551"],
+  chain: ["Nexus", "testnet", "follows-a8fa7f"],
   nodes: ["https://lattice-testnet-apps-iad.fly.dev", "https://lattice-testnet-apps-ams.fly.dev"],
   // The trial chain's hosts admit 0-fee transactions: writes are free.
   fee: 0n,
