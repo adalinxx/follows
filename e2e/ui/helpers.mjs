@@ -4,15 +4,15 @@ import * as sdk from "../../vendor/lattice-sdk.js";
 import * as follows from "../../src/records/follows.mjs";
 import { tip, view, volumeLoader } from "../../src/records/state.mjs";
 import { transaction } from "../../src/records/wallet.mjs";
-import * as profile from "../../app/vendor/moniker-sdk/src/records/profile.mjs";
+import * as names from "../../app/vendor/moniker-sdk/src/records/names.mjs";
 import { FOLLOWS, MONIKER } from "./stack.mjs";
 
 export { sdk };
 
-/** A new account: its address and private key. */
+/** A new account: its address, private key, and the key in hex for Selfhold. */
 export function newAccount() {
   const privateKey = sdk.generatePrivateKey();
-  return { address: sdk.accountFromPrivateKey(privateKey).address, privateKey };
+  return { address: sdk.accountFromPrivateKey(privateKey).address, privateKey, keyHex: Buffer.from(privateKey).toString("hex") };
 }
 
 export async function until(label, condition, seconds = 300) {
@@ -63,45 +63,41 @@ export function client(node) {
     });
   }
 
+  /** Moniker as the records read it, from its tip now. */
+  const resolver = async () => {
+    const m = await state.moniker();
+    return { pointers: (hs) => Promise.all(hs.map((h) => names.pointer(m, h))), handlesOf: (as) => names.handlesOf(m, as) };
+  };
+  /** The actions for `who` following `t`, an account or a @handle, as the library writes them. */
+  const followActions = async (who, t) => (await follows.follow(await state.follows(), await resolver(), who.address, t)).actions;
+
   return {
     state,
     submit,
     write,
-    /** A new profile owned by `who`, with `card` and the free name `handle` if given; its id, once landed. */
-    profile: async (who, card, handle) => {
-      const { id, write: created } = await profile.createProfile(await state.moniker(), who.address, { card, handle });
-      await write(MONIKER, who, created.actions);
-      return id;
+    /** The actions for `who` claiming the free `@handle` and showing it, unsent. */
+    claimActions: async (who, handle) => (await names.claim(await state.moniker(), who.address, handle, { show: true })).actions,
+    /** `who` claims the free `@handle` on Moniker and shows it. */
+    claim: async (who, handle) => write(MONIKER, who, (await names.claim(await state.moniker(), who.address, handle, { show: true })).actions),
+    /** `who` stops showing its handle: apps show its account's tail. */
+    stopShowing: async (who) => write(MONIKER, who, (await names.stopShowing(await state.moniker(), who.address)).actions),
+    /** `from` gives `@handle` to `to`, who takes it and shows it. */
+    give: async (from, handle, to) => {
+      await write(MONIKER, from, (await names.offerName(await state.moniker(), from.address, handle, to.address)).actions);
+      await write(MONIKER, to, (await names.buy(await state.moniker(), to.address, handle, { show: true })).actions);
     },
-    /** Account `who`, acting for profile `p`, follows each of `targets`, in one transaction. */
-    follow: async (who, p, ...targets) => {
-      const s = await state.follows();
+    /** `who` follows each of `targets` (accounts or @handles) as the library would, in one transaction. */
+    follow: async (who, ...targets) => {
       const actions = [];
-      for (const t of targets) actions.push(...(await follows.follow(s, who.address, p, t)).actions);
+      for (const t of targets) actions.push(...(await followActions(who, t)));
       await write(FOLLOWS, who, actions);
     },
-    /** The actions for `who`, as `p`, following `t`, unsent. */
-    followActions: async (who, p, t) => (await follows.follow(await state.follows(), who.address, p, t)).actions,
-    unfollow: async (who, p, t) => write(FOLLOWS, who, (await follows.unfollow(await state.follows(), who.address, p, t)).actions),
-    /** `owner` makes account `admin` an admin of its profile `p`. */
-    admin: async (owner, p, admin) => write(MONIKER, owner, (await profile.setAdmin(await state.moniker(), owner.address, p, admin.address)).actions),
-    /** `from` offers its profile `p` to `to`, who takes it. */
-    hand: async (from, p, to) => {
-      await write(MONIKER, from, (await profile.setProfileTerms(await state.moniker(), from.address, p, { offer: to.address })).actions);
-      await write(MONIKER, to, (await profile.takeProfile(await state.moniker(), to.address, p)).actions);
-    },
+    followActions,
+    /** `who` follows `account` by its account, whatever handle it shows. */
+    followAccount: async (who, account) =>
+      write(FOLLOWS, who, [follows.followKey(who.address, account), follows.followerKey(who.address, account)].map((key) => ({ key, newValue: "1" }))),
+    unfollow: async (who, t) => write(FOLLOWS, who, (await follows.unfollow(await state.follows(), await resolver(), who.address, t)).actions),
+    /** Whether `who` holds a follow key for `t`, exactly as given (an address or `@h`). */
+    keyed: async (who, t) => (await (await state.follows()).get(follows.followKey(who.address, t))) === "1",
   };
-}
-
-/** A one-block media Volume, `{ type, bytes }`, kept by the node; its CID. */
-export async function pinMedia(info, type, bytes) {
-  const block = sdk.encodeDagCbor({ bytes, type });
-  const cid = sdk.cidV1DagCbor(block);
-  const r = await fetch(`${info.rpc}/pins`, {
-    method: "POST",
-    headers: { Authorization: `Basic ${btoa(info.cookie())}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ cid, entries: { [cid]: Buffer.from(block).toString("base64") } }),
-  });
-  if (!r.ok) throw new Error(`pin: ${r.status} ${await r.text()}`);
-  return cid;
 }

@@ -1,15 +1,15 @@
-// Follows: look someone up, see who follows them and whom they follow, and
-// follow them. Follows come from the Follows chain; names and photos from
-// Moniker. Both are read from public nodes and checked by CID.
+// Follows: look someone up by @handle or account, see who follows them and
+// whom they follow, and follow them. Follows come from the Follows chain;
+// handles from Moniker. Both are read from public nodes and checked by CID.
 //
-// Routes: #/                       the search
-//         #/<who>                  a profile's page (<who> is @handle or profile id)
-//         #/<who>/followers        the profiles that follow it
-//         #/<who>/following        the profiles it follows
+// Routes: #/                       the search, and you
+//         #/@<h>                   a handle's page: the account that shows it
+//         #/<address>              an account's page
+//         #/<who>/followers        the accounts that follow them
+//         #/<who>/following        whom they follow
 //
-// A profile follows profiles: a @handle is read as the profile holding it
-// now. Accounts are never shown; a follow counts while the account that
-// wrote it acts for the following profile.
+// An account follows an account, or a handle. A person shows by the handle
+// they show on Moniker, or by their account's tail when they show none.
 //
 // A link may carry `?node=` (nodes, comma-separated), `?chain=` (the Follows
 // chain) and `?moniker=` (the Moniker chain) to read somewhere else.
@@ -17,20 +17,23 @@ import * as sdk from "../vendor/lattice-sdk.js";
 import { createFollows } from "../src/index.mjs";
 import { defineFollowButton } from "../src/element.mjs";
 import { createMoniker } from "./vendor/moniker-sdk/src/index.mjs";
-import { count, matches, parseWho } from "./lib.mjs";
+import { defineHandlePicker } from "./vendor/moniker-sdk/src/picker.mjs";
+import { count, labelOf, matches, parseWho, pathOf } from "./lib.mjs";
 
+const MONIKER_APP = "https://app.moniker.bio/";
 const params = new URLSearchParams(location.search);
 const nodes = params.get("node")?.split(",");
 const chainOf = (name) => params.get(name)?.split("/");
-const moniker = createMoniker({ sdk, app: "https://app.moniker.bio/", ...(nodes && { nodes }), ...(chainOf("moniker") && { chain: chainOf("moniker") }) });
+const moniker = createMoniker({ sdk, app: MONIKER_APP, ...(nodes && { nodes }), ...(chainOf("moniker") && { chain: chainOf("moniker") }) });
 const graph = createFollows({ sdk, moniker, ...(nodes && { nodes }), ...(chainOf("chain") && { chain: chainOf("chain") }) });
 defineFollowButton(graph);
-const label = moniker.label;
+defineHandlePicker(moniker, { app: MONIKER_APP });
+const wallet = () => globalThis.lattice;
 
 const main = document.querySelector("main");
 const search = document.querySelector("#search");
 const esc = (text) => String(text).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-const link = (who) => `#/${encodeURIComponent(who)}`;
+const link = (p) => `#/${encodeURIComponent(pathOf(p))}`;
 // A list longer than this gets a filter.
 const FILTER_FROM = 20;
 // Rows shown at first, and added by Show more.
@@ -51,23 +54,6 @@ function route() {
   return { who, list: list === "followers" || list === "following" ? list : "" };
 }
 
-// ---------------------------------------------------------------- reading
-
-/** The profile `who` names, by its @handle or its id; undefined when there is none. */
-async function lookUp(parsed) {
-  const id = parsed.handle ? await moniker.resolve(parsed.handle) : parsed.id;
-  return id && moniker.profile(id);
-}
-
-/** Rows for profiles: their Moniker cards, each linked by the name it shows, or its id. */
-async function profileRows(ids) {
-  return (await moniker.profiles(ids)).map((p) => ({
-    ...p,
-    href: link(p.handle ? `@${p.handle}` : p.id),
-    detail: p.handle && p.name ? `@${p.handle}` : "",
-  }));
-}
-
 // ---------------------------------------------------------------- views
 
 let pages = 0; // pages shown so far
@@ -77,15 +63,16 @@ async function render() {
   search.value = "";
   if (who === "") return home();
   const parsed = parseWho(who);
-  if (!parsed) return message(`“${who}” isn't a @handle. Handles look like @name.`);
+  if (!parsed) return message(`“${who}” isn't a @handle or an account.`);
   if (shown?.who !== who || shown?.list !== list) filter = "";
   main.innerHTML = `<p class="status muted">Loading…</p>`;
   try {
-    const found = await lookUp(parsed);
+    const p = await graph.person(parsed.account ?? `@${parsed.handle}`);
     if (route().who !== who || route().list !== list) return; // moved on meanwhile
-    if (!found) return message(parsed.handle ? `No one holds @${parsed.handle}.` : "There's no profile with this ID.");
-    if (list) await listPage(who, list, found);
-    else await profilePage(who, found);
+    if (p.account === undefined && !(await moniker.name(p.handle))) return message(`No one holds @${p.handle}.`);
+    if (route().who !== who || route().list !== list) return;
+    if (list) await listPage(who, list, p);
+    else await personPage(who, p);
     // A new page: focus its heading, so keyboard and screen reader users start there.
     if (pages++ > 0 && route().who === who && !main.contains(document.activeElement)) {
       const heading = main.querySelector("h1");
@@ -99,19 +86,72 @@ async function render() {
   }
 }
 
-function home() {
+async function home() {
   shown = null;
   main.innerHTML = `
     <section class="home">
       <h1>One follow list for every app.</h1>
       <p class="muted">Follow someone once and every app that reads Follows knows it. Search a @handle to see who follows them.</p>
     </section>
+    <section class="mine" hidden></section>
     ${recent().length ? `
       <section class="recent">
         <h2>Recently viewed</h2>
-        <ul class="people">${recent().map((r) => `<li><a href="${esc(link(r.who))}"><span class="who"><strong>${esc(r.title)}</strong><span class="muted small">${esc(r.detail)}</span></span></a></li>`).join("")}</ul>
+        <ul class="people">${recent().map((p) => row(p)).join("")}</ul>
       </section>` : ""}`;
   search.focus();
+  await yours();
+}
+
+/**
+ * You, under the search: your handle (or account), your counts, linked to
+ * your lists, and a way to show a handle if you show none. Shown only once
+ * Selfhold is connected; with Selfhold there but not yet connected, a button
+ * connects it.
+ */
+async function yours() {
+  const section = main.querySelector(".mine");
+  if (!section || !wallet()?.writeRecords) return;
+  let me;
+  try {
+    me = await wallet().address?.();
+  } catch {}
+  if (!main.contains(section)) return; // moved on meanwhile
+  if (!me) {
+    section.hidden = false;
+    section.innerHTML = `<h2>You</h2><button type="button" id="connect">Connect Selfhold</button>`;
+    section.querySelector("#connect").onclick = async () => {
+      try {
+        await wallet().connect();
+        await yours();
+      } catch {} // declined: the button stays
+    };
+    return;
+  }
+  try {
+    const p = await graph.person(me);
+    const n = await graph.counts(me);
+    if (!main.contains(section)) return;
+    section.hidden = false;
+    section.innerHTML = `<h2>You</h2>
+      <ul class="people"><li class="handle-row">
+        <a href="${esc(link(p))}">${avatar(p, 40)}<span class="who"><strong>${esc(labelOf(p))}</strong></span></a>
+        <span class="row-counts small">
+          <a href="${esc(link(p))}/followers">${esc(count(n.followers, "follower"))}</a>
+          <a href="${esc(link(p))}/following">${esc(count(n.following, "following", "following"))}</a>
+        </span></li></ul>
+      ${p.handle === undefined ? `<p class="muted small">You show no @handle, so apps show your account's tail. <button type="button" class="link" id="pick">Show a handle</button></p>
+        <moniker-handle-picker></moniker-handle-picker>` : ""}`;
+    const pick = section.querySelector("#pick");
+    if (pick) {
+      pick.onclick = async () => {
+        const handle = await section.querySelector("moniker-handle-picker").open();
+        if (handle && main.contains(section)) await yours();
+      };
+    }
+  } catch {
+    section.hidden = true; // the search still works; the next visit reads again
+  }
 }
 
 function message(text) {
@@ -119,151 +159,112 @@ function message(text) {
   main.innerHTML = `<p class="status">${esc(text)}</p>`;
 }
 
-/** How a profile's lists are titled: by the name it shows, else as its page is. */
-const short = (profile) => (profile.handle ? `@${profile.handle}` : label(profile));
-
-async function counts({ id }) {
-  const [followers, following] = await Promise.all([graph.followers(id), graph.following(id)]);
-  return { followers: followers.length, following: following.length };
-}
-
 const many = (n, one, other) => `<strong>${n.toLocaleString("en-US")}</strong> ${n === 1 ? one : other}`;
-const countLinks = (who, n) => `
-  <a href="${esc(link(who))}/followers">${many(n.followers, "follower", "followers")}</a>
-  <a href="${esc(link(who))}/following">${many(n.following, "following", "following")}</a>`;
+const countLinks = (p, n) => `
+  <a href="${esc(link(p))}/followers">${many(n.followers, "follower", "followers")}</a>
+  <a href="${esc(link(p))}/following">${many(n.following, "following", "following")}</a>`;
 
-async function profilePage(who, profile) {
-  const n = await counts(profile);
+/** What a page's heading calls a person. */
+const title = (p) => (p.handle !== undefined ? `@${p.handle}` : `Account ${labelOf(p)}`);
+
+async function personPage(who, p) {
+  const n = await graph.counts(pathOf(p));
   if (route().who !== who || route().list) return; // moved on meanwhile
   shown = { who, list: "" };
-  const title = label(profile);
-  remember(who, title, profile.handle ? `@${profile.handle}` : "");
+  remember(p);
+  const nobody = p.account === undefined;
   main.innerHTML = `
     <section class="person">
-      ${avatar(profile, 72)}
+      ${avatar(p, 72)}
       <div>
-        <h1>${esc(title)}</h1>
-        ${profile.handle && profile.name ? `<p class="muted names">@${esc(profile.handle)}</p>` : ""}
-        ${profile.description ? `<p class="bio">${esc(profile.description)}</p>` : ""}
-        <p class="links">
-          <button type="button" class="copy" data-copy="${esc(profile.id)}">Copy profile ID</button>
-          <a href="${esc(moniker.pageURL(profile.handle ? `@${profile.handle}` : profile.id))}" target="_blank" rel="noopener">Moniker page</a>
-        </p>
-        <p class="sr" role="status" id="copied"></p>
+        <h1>${esc(title(p))}</h1>
+        ${nobody ? `<p class="muted small">No account shows @${esc(p.handle)} now. Follow it, and you follow whoever shows it next.</p>` : ""}
+        ${p.handle !== undefined ? `<p class="links"><a href="${esc(moniker.pageURL(`@${p.handle}`))}" target="_blank" rel="noopener">Moniker page</a></p>` : ""}
       </div>
     </section>
-    <p class="counts" data-id="${esc(profile.id)}">${countLinks(who, n)}</p>
-    <div class="follow"><follows-button target="${esc(profile.id)}" label="${esc(title)}"></follows-button></div>`;
-  const copy = main.querySelector(".copy");
-  copy.onclick = () => navigator.clipboard?.writeText(copy.dataset.copy).then(() => {
-    copy.textContent = "Copied";
-    main.querySelector("#copied").textContent = "Profile ID copied";
-    setTimeout(() => (copy.textContent = "Copy profile ID"), 2000);
-  });
-  photos();
+    <p class="counts" data-who="${esc(pathOf(p))}">${countLinks(p, n)}</p>
+    <div class="follow"><follows-button target="${esc(pathOf(p))}"></follows-button></div>`;
 }
 
-async function listPage(who, list, profile) {
-  // The list itself is one prefix read; each row's card is another read, so
-  // cards are read a page at a time.
-  const all = list === "followers" ? await graph.followers(profile.id) : await graph.following(profile.id);
-  const rows = await profileRows(all.slice(0, PAGE));
+async function listPage(who, list, p) {
+  let all;
+  if (list === "followers") {
+    const accounts = await graph.followers(pathOf(p));
+    const handles = await moniker.handlesOf(accounts);
+    all = accounts.map((account, i) => (handles[i] === undefined ? { account } : { account, handle: handles[i] }));
+  } else {
+    all = await graph.following(pathOf(p));
+  }
   if (route().who !== who || route().list !== list) return; // moved on meanwhile
   const empty = list === "followers" ? "No followers yet." : "Not following anyone yet.";
-  shown = { who, list, all, rows, empty };
+  shown = { who, list, all, rows: all.slice(0, PAGE), empty };
   main.innerHTML = `
-    <a class="back" href="${esc(link(who))}">‹ ${esc(label(profile))}</a>
-    <h1 class="list-title">${esc(list === "followers" ? `${short(profile)}'s followers` : `${short(profile)} follows`)}</h1>
+    <a class="back" href="${esc(link(p))}">‹ ${esc(title(p))}</a>
+    <h1 class="list-title">${esc(list === "followers" ? `${title(p)}'s followers` : `${title(p)} follows`)}</h1>
     ${all.length > FILTER_FROM ? `
       <label class="filter"><span class="sr">Filter this list</span>
-        <input id="filter" type="search" placeholder="Filter by name or @handle" autocomplete="off" value="${esc(filter)}">
+        <input id="filter" type="search" placeholder="Filter by @handle" autocomplete="off" value="${esc(filter)}">
       </label>` : ""}
     <p class="muted small" role="status" id="results"></p>
     <ul class="people"></ul>
     <button type="button" class="more" id="more" hidden></button>`;
   const input = main.querySelector("#filter");
   if (input) {
-    input.oninput = async () => {
+    input.oninput = () => {
       filter = input.value;
-      // A filter looks through everyone: read the cards not read yet, once.
-      if (filter.trim() && shown.rows.length < shown.all.length) await more(Infinity);
       draw();
     };
   }
-  main.querySelector("#more").onclick = () => more(PAGE);
+  main.querySelector("#more").onclick = () => {
+    shown.rows = shown.all.slice(0, shown.rows.length + PAGE);
+    draw();
+  };
   draw();
 }
 
-/** Reads the next `n` rows' cards and shows them. */
-async function more(n) {
-  const view = shown;
-  if (view.loading) return view.loading;
-  main.querySelector("#results").textContent = "Loading…";
-  view.loading = (async () => {
-    const next = await profileRows(view.all.slice(view.rows.length, view.rows.length + n));
-    if (shown !== view) return;
-    view.rows = [...view.rows, ...next];
-    view.loading = null;
-    draw();
-  })();
-  return view.loading;
-}
+/** A person's row, linked to their page. */
+const row = (p) => `<li><a href="${esc(link(p))}">${avatar(p, 40)}<span class="who"><strong>${esc(labelOf(p))}</strong></span></a></li>`;
 
 function draw() {
   const ul = main.querySelector(".people");
   const { rows, all, empty } = shown;
-  const kept = rows.filter((row) => matches(row, filter));
+  // A filter looks through everyone.
+  const kept = filter.trim() ? all.filter((p) => matches(p, filter)) : rows;
   main.querySelector("#results").textContent = filter.trim() ? count(kept.length, "result") : "";
   const moreButton = main.querySelector("#more");
   const left = all.length - rows.length;
   moreButton.hidden = left === 0 || Boolean(filter.trim());
   moreButton.textContent = `Show ${Math.min(left, PAGE)} more`;
-  if (rows.length === 0) {
+  if (all.length === 0) {
     ul.innerHTML = `<li class="empty muted">${esc(empty)}</li>`;
   } else if (kept.length === 0) {
     ul.innerHTML = `<li class="empty muted">No one here matches “${esc(filter.trim())}”.</li>`;
   } else {
-    ul.innerHTML = kept
-      .map(
-        (row) => `<li><a href="${esc(row.href)}">
-          ${avatar(row, 40)}
-          <span class="who"><strong>${esc(label(row))}</strong>${row.detail ? `<span class="muted small">${esc(row.detail)}</span>` : ""}</span>
-        </a></li>`,
-      )
-      .join("");
-  }
-  photos();
-}
-
-/** An avatar: the Moniker photo once it loads, the first letter until then, blank with no name. */
-function avatar(profile, size) {
-  const letter = profile.name || profile.handle ? label(profile).replace(/^@/, "").charAt(0).toUpperCase() : "";
-  return `<span class="avatar" style="--size:${size}px" ${profile.avatar ? `data-cid="${esc(profile.avatar)}"` : ""} aria-hidden="true">${esc(letter)}</span>`;
-}
-
-function photos() {
-  for (const span of main.querySelectorAll(".avatar[data-cid]")) {
-    const cid = span.dataset.cid;
-    delete span.dataset.cid;
-    moniker.photo(cid).then((url) => {
-      if (url) span.innerHTML = `<img src="${url}" alt="">`;
-    });
+    ul.innerHTML = kept.map(row).join("");
   }
 }
+
+/** An avatar: the handle's first letter, or a dot for an account with none. */
+const avatar = (p, size) => `<span class="avatar" style="--size:${size}px" aria-hidden="true">${esc(p.handle?.charAt(0).toUpperCase() ?? "·")}</span>`;
 
 // ---------------------------------------------------------------- recently viewed (this browser only)
 
 function recent() {
   try {
-    return JSON.parse(localStorage.getItem("follows.recent") ?? "[]");
+    const kept = JSON.parse(localStorage.getItem("follows.recent.v2") ?? "[]");
+    return Array.isArray(kept) ? kept.flatMap((path) => {
+      const p = parseWho(path);
+      return p && pathOf(p) === path ? [p] : [];
+    }) : [];
   } catch {
     return [];
   }
 }
-function remember(who, title, detail) {
+function remember(p) {
   try {
-    const next = [{ who, title, detail }, ...recent().filter((r) => r.who !== who)].slice(0, 6);
-    localStorage.setItem("follows.recent", JSON.stringify(next));
+    const path = pathOf(p);
+    const next = [path, ...recent().map(pathOf).filter((x) => x !== path)].slice(0, 6);
+    localStorage.setItem("follows.recent.v2", JSON.stringify(next));
   } catch {}
 }
 
@@ -273,8 +274,8 @@ document.querySelector("#find").onsubmit = (event) => {
   event.preventDefault();
   const typed = search.value.trim();
   const who = parseWho(typed);
-  if (!who) return message(`“${typed}” isn't a @handle. Handles look like @name.`);
-  location.hash = link(who.id ?? `@${who.handle}`);
+  if (!who) return message(`“${typed}” isn't a @handle or an account. Handles look like @name.`);
+  location.hash = link(who);
 };
 addEventListener("hashchange", render);
 // A follow or unfollow saved: update the counts in place, keeping the button (and its "Saved.").
@@ -282,7 +283,8 @@ addEventListener("follows:change", async () => {
   const shownCounts = main.querySelector(".counts");
   if (!shownCounts) return;
   try {
-    shownCounts.innerHTML = countLinks(route().who, await counts({ id: shownCounts.dataset.id }));
+    const { who } = shownCounts.dataset;
+    shownCounts.innerHTML = countLinks(parseWho(who), await graph.counts(who));
   } catch {} // the counts stay as they were; the next visit reads them again
 });
 render();

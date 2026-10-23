@@ -1,13 +1,17 @@
-// The follow graph's records. A profile follows a profile: both are Moniker
-// profiles, by id. Account `<a>`, acting for profile `<p>`, follows profile
-// `<t>` with two keys, `follows/<p>/<t>/<a>` and its twin
-// `followers/<t>/<p>/<a>`, so that both ends are one prefix read. Only `<a>`
-// may write them, and always together (the chain's policy).
+// The follow graph's records. An account follows an account, or a handle: a
+// Moniker name, which stands for the account that shows it now. Account
+// `<a>` follows `<t>` with two keys, `follows/<a>/<t>` and its twin
+// `followers/<t>/<a>`, so that both ends are one prefix read. `<t>` is an
+// account address, or `@<h>`. Only `<a>` may write them, and always together
+// (the chain's policy).
 //
-// The chain can't see Moniker, so readers decide: a follow counts while its
-// account acts for `<p>` now (owns it, or is its admin), as checked by an
-// `actsFor(account, p)` the reader passes in. When a profile changes hands,
-// the old owner's follows lapse, and the new owner writes their own.
+// The chain can't see Moniker, so readers resolve handles, through `names`
+// the reader passes in: `{ pointers(handles), handlesOf(addresses) }`, each
+// answering in order. `@h` stands for account `x` while `h` points at `x` and
+// `x` shows `h`, the test every app uses to show `@h` beside `x`. A person's
+// followers are those of their account and of the handle they show now, each
+// account once. When a handle changes hands, its followers follow whoever
+// shows it next; an account's own followers stay with it.
 
 /**
  * Whether `text` is an account address in its one canonical spelling, as the
@@ -25,82 +29,144 @@ export function isAddress(text) {
   );
 }
 
-/** Whether `text` is a Moniker profile id: 16 characters of `a`–`z` and `2`–`7`. */
-export const isProfileId = (text) => typeof text === "string" && /^[a-z2-7]{16}$/.test(text);
+/** Whether `text` is a Moniker handle, without its @: lowercase letters, digits and `_`. */
+export const isHandle = (text) => typeof text === "string" && /^[a-z0-9_]+$/.test(text);
 
-/** Throws unless `p` and `t` are profile ids. */
-function profiles(p, t) {
-  for (const id of [p, t]) if (!isProfileId(id)) throw new Error(`not a profile: ${id}`);
+/**
+ * What `who` names, as a key spells it: an account address as given, or
+ * `@<h>` for a handle, given with or without its @. A bare address is an
+ * account; a handle spelled like one needs its @.
+ */
+export function target(who) {
+  if (isAddress(who)) return who;
+  const h = String(who).replace(/^@/, "");
+  if (isHandle(h)) return `@${h}`;
+  throw new Error(`not an account or a handle: ${who}`);
 }
 
-export const followKey = (p, t, account) => (profiles(p, t), `follows/${p}/${t}/${account}`);
-export const followerKey = (p, t, account) => (profiles(p, t), `followers/${t}/${p}/${account}`);
+/** Throws unless `account` is an account address. */
+function needAccount(account) {
+  if (!isAddress(account)) throw new Error(`not an account: ${account}`);
+}
 
-/** The keys under `prefix`, `<prefix><id>/<account>`, as a map from id to its accounts, in key order. */
-async function accountsBy(state, prefix) {
-  const found = new Map();
+export const followKey = (account, t) => (needAccount(account), `follows/${account}/${target(t)}`);
+export const followerKey = (account, t) => (needAccount(account), `followers/${target(t)}/${account}`);
+
+/** The last segment of each key under `prefix`, in key order. */
+async function under(state, prefix) {
+  const found = [];
   for await (const [key] of state.list(prefix)) {
-    const [id, account] = key.slice(prefix.length).split("/");
-    found.set(id, [...(found.get(id) ?? []), account]);
+    const rest = key.slice(prefix.length);
+    if (!rest.includes("/")) found.push(rest);
   }
   return found;
 }
 
-/** `actsFor`, asked once per account and profile. */
-function remembered(actsFor) {
-  const asked = new Map();
-  return (account, p) => {
-    const key = `${account}/${p}`;
-    if (!asked.has(key)) asked.set(key, actsFor(account, p));
-    return asked.get(key);
-  };
+/** The handle each account shows, or undefined, in order; nothing is asked for a missing account. */
+async function shownBy(names, accounts) {
+  const asked = accounts.filter((a) => a !== undefined);
+  const answers = asked.length === 0 ? [] : await names.handlesOf(asked);
+  let next = 0;
+  return accounts.map((a) => (a === undefined ? undefined : answers[next++]));
 }
 
-/** Whether any of `accounts` acts for profile `p` now. */
-const anyActs = async (accounts, p, actsFor) => (await Promise.all(accounts.map((a) => actsFor(a, p)))).includes(true);
-
-/** The ids in `found` (from accountsBy) whose follow counts: `profileOf(id)` is the following profile. */
-async function counted(found, profileOf, actsFor) {
-  const acts = remembered(actsFor);
-  const ids = [...found.keys()];
-  const keep = await Promise.all(ids.map((id) => anyActs(found.get(id), profileOf(id), acts)));
-  return ids.filter((_, i) => keep[i]);
+/** Each handle's account, or undefined: the one it points at, while that account shows it. */
+export async function accountsOf(names, handles) {
+  if (handles.length === 0) return [];
+  const pointed = await names.pointers(handles);
+  const shown = await shownBy(names, pointed);
+  return handles.map((h, i) => (pointed[i] !== undefined && shown[i] === h ? pointed[i] : undefined));
 }
 
-/** Whether profile `p` follows profile `t`: some account that wrote it acts for `p` now. */
-export async function follows(state, p, t, actsFor) {
-  profiles(p, t);
-  const prefix = `follows/${p}/${t}/`;
-  const accounts = [];
-  for await (const [key] of state.list(prefix)) accounts.push(key.slice(prefix.length));
-  return anyActs(accounts, p, actsFor);
+/**
+ * Who `who` is: `{ account, handle }`, the handle the account shows now,
+ * or, for a handle no account shows, `{ handle }` alone.
+ */
+export async function person(names, who) {
+  const t = target(who);
+  if (!t.startsWith("@")) {
+    const [handle] = await names.handlesOf([t]);
+    return handle === undefined ? { account: t } : { account: t, handle };
+  }
+  const handle = t.slice(1);
+  const [account] = await accountsOf(names, [handle]);
+  return account === undefined ? { handle } : { account, handle };
 }
 
-/** The profiles `p` follows, in key order. */
-export const following = async (state, p, actsFor) => counted(await accountsBy(state, `follows/${p}/`), () => p, actsFor);
+/** The keys that follow a person: their account's and their handle's. */
+const forms = (p) => [p.account, p.handle === undefined ? undefined : `@${p.handle}`].filter(Boolean);
 
-/** The profiles that follow `t`, in key order: each once, however many accounts wrote it. */
-export const followers = async (state, t, actsFor) => counted(await accountsBy(state, `followers/${t}/`), (p) => p, actsFor);
-
-/** `account`, acting for profile `p`, follows `t`; nothing to write when its keys are there. */
-export async function follow(state, account, p, t) {
-  const keys = [followKey(p, t, account), followerKey(p, t, account)];
-  if ((await state.get(keys[0])) !== undefined) return { actions: [] };
-  return { actions: keys.map((key) => ({ key, newValue: "1" })) };
+/** The accounts that follow `who`, each once, in key order: its account's followers, then its handle's. */
+export async function followers(state, names, who) {
+  const lists = await Promise.all(forms(await person(names, who)).map((t) => under(state, `followers/${t}/`)));
+  return [...new Set(lists.flat())].filter(isAddress);
 }
 
-/** `account` deletes its keys for `p` following `t`; nothing to write when there are none. Others' keys stay. */
-export async function unfollow(state, account, p, t) {
-  const keys = [followKey(p, t, account), followerKey(p, t, account)];
-  const oldValues = await Promise.all(keys.map((key) => state.get(key)));
-  if (oldValues[0] === undefined) return { actions: [] };
-  return { actions: keys.map((key, i) => ({ key, oldValue: oldValues[i] })) };
+/**
+ * Whom `account` follows, one entry a person, in key order: `{ account,
+ * handle }` (the handle it shows, if any), or `{ handle }` for a followed
+ * handle that no account shows now.
+ */
+export async function following(state, names, account) {
+  if (!isAddress(account)) return [];
+  const targets = await under(state, `follows/${account}/`);
+  const handles = targets.filter((t) => t.startsWith("@") && isHandle(t.slice(1))).map((t) => t.slice(1));
+  const viaHandle = new Map(handles.map((h, i) => [h, i]));
+  const resolved = await accountsOf(names, handles);
+  const accounts = targets.map((t) => (t.startsWith("@") ? resolved[viaHandle.get(t.slice(1))] : isAddress(t) ? t : undefined));
+  const shown = await shownBy(names, accounts);
+  const people = [];
+  const seen = new Set();
+  targets.forEach((t, i) => {
+    const a = accounts[i];
+    if (a === undefined) {
+      if (t.startsWith("@") && isHandle(t.slice(1))) people.push({ handle: t.slice(1) });
+      return;
+    }
+    if (seen.has(a)) return;
+    seen.add(a);
+    people.push(shown[i] === undefined ? { account: a } : { account: a, handle: shown[i] });
+  });
+  return people;
+}
+
+/** Whether `account` follows `who`, by its account or by the handle it shows. */
+export async function follows(state, names, account, who) {
+  if (!isAddress(account)) return false;
+  const found = await Promise.all(forms(await person(names, who)).map((t) => state.get(`follows/${account}/${t}`)));
+  return found.some((value) => value !== undefined);
+}
+
+/**
+ * `account` follows `who`: its handle if it shows one, else its account.
+ * Nothing to write when it already follows them either way.
+ */
+export async function follow(state, names, account, who) {
+  needAccount(account);
+  const p = await person(names, who);
+  if (p.account === account) throw new Error("You can't follow yourself.");
+  if (await follows(state, names, account, who)) return { actions: [] };
+  const t = p.handle === undefined ? p.account : `@${p.handle}`;
+  return { actions: [followKey(account, t), followerKey(account, t)].map((key) => ({ key, newValue: "1" })) };
+}
+
+/** `account` deletes its keys following `who`, by account and by handle; nothing to write when there are none. */
+export async function unfollow(state, names, account, who) {
+  needAccount(account);
+  const actions = [];
+  for (const t of forms(await person(names, who))) {
+    const keys = [followKey(account, t), followerKey(account, t)];
+    const oldValues = await Promise.all(keys.map((key) => state.get(key)));
+    if (oldValues[0] !== undefined) actions.push(...keys.map((key, i) => ({ key, oldValue: oldValues[i] })));
+  }
+  return { actions };
 }
 
 /**
  * What `account` is saving, from transaction bodies not yet in a block, by
- * `"<p>/<t>"`: `true` for a follow, `false` for an unfollow. A pending write
- * may still be dropped, so it is never a follow yet.
+ * followed target (an address or `@<h>`): `true` for a follow, `false` for
+ * an unfollow. A pending write may still be dropped, so it is never a
+ * follow yet.
  */
 export function pendingIn(bodies, account) {
   const found = {};
@@ -108,8 +174,9 @@ export function pendingIn(bodies, account) {
     // Anyone can put anything in a mempool: read only what is shaped as a body.
     if (!Array.isArray(body?.signers) || !body.signers.includes(account) || !Array.isArray(body.actions)) continue;
     for (const action of body.actions) {
-      const [root, p, t, by, rest] = typeof action?.key === "string" ? action.key.split("/") : [];
-      if (root === "follows" && by === account && rest === undefined && isProfileId(p) && isProfileId(t)) found[`${p}/${t}`] = action.newValue !== undefined;
+      const [root, by, t, rest] = typeof action?.key === "string" ? action.key.split("/") : [];
+      if (root !== "follows" || by !== account || rest !== undefined || t === undefined) continue;
+      if (isAddress(t) || (t.startsWith("@") && isHandle(t.slice(1)))) found[t] = action.newValue !== undefined;
     }
   }
   return found;

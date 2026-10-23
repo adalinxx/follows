@@ -1,25 +1,25 @@
-// The page's pure parts: what was typed into the search box, and which
-// profiles a filter keeps.
-import { isProfileId } from "../src/index.mjs";
+// The page's pure parts: what was typed into the search box, how a person
+// is labelled, and which people a filter keeps.
+import { isAddress, isHandle } from "../src/index.mjs";
 
-const HANDLE = /^[a-z0-9_]+$/;
-
-/**
- * Whom the search box names: `{ id }` for a profile id as typed, else
- * `{ handle }`, or null. A @ makes it a handle, even one shaped like an id.
- */
+/** Whom the search box names: `{ handle }` for a @handle, with or without @, in any case; `{ account }` for an address; or null. */
 export function parseWho(text) {
   const typed = String(text ?? "").trim();
-  if (isProfileId(typed)) return { id: typed };
+  if (isAddress(typed)) return { account: typed };
   const handle = typed.replace(/^@/, "").toLowerCase();
-  return HANDLE.test(handle) ? { handle } : null;
+  return isHandle(handle) ? { handle } : null;
 }
 
-/** Whether a filter keeps a profile: its name, @handle or id contains the query. */
-export function matches(profile, query) {
+/** How a person shows: `@handle`, or the tail of an account that shows none. */
+export const labelOf = (p) => (p.handle !== undefined ? `@${p.handle}` : `…${p.account.slice(-4)}`);
+
+/** Where a person's page is: by handle while they show one, else by account. */
+export const pathOf = (p) => (p.handle !== undefined ? `@${p.handle}` : p.account);
+
+/** Whether a filter keeps a person: their label contains the query, ignoring case and @. */
+export function matches(p, query) {
   const q = String(query ?? "").trim().toLowerCase().replace(/^@/, "");
-  if (q === "") return true;
-  return [profile.name, profile.handle, profile.id].some((field) => typeof field === "string" && field.toLowerCase().includes(q));
+  return q === "" || labelOf(p).replace(/^[@…]/, "").includes(q) || (p.account ?? "").includes(q);
 }
 
 /** `1 follower`, `2 followers`, `1,204 following`. */

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Another app</title>
+<style>body { font: 16px system-ui, sans-serif; margin: 24px; background: #fff; color: #121418; }</style>
+</head>
+<body>
+<!-- Another app's page, as a stand-in: a review by someone, their name wrapped in <follows-who>. -->
+<main>
+  <p>A review by <span id="who"></span></p>
+</main>
+<script type="module">
+  // ?node=, ?chain=, ?moniker=, ?address= and ?card= (JSON) say what to read and show.
+  import * as sdk from "../../vendor/lattice-sdk.js";
+  import { createFollows } from "../../src/index.mjs";
+  import { defineWho } from "../../src/who.mjs";
+  import { createMoniker } from "../../app/vendor/moniker-sdk/src/index.mjs";
+  import { defineMonikerName } from "../../app/vendor/moniker-sdk/src/element.mjs";
+  const params = new URLSearchParams(location.search);
+  const nodes = params.get("node").split(",");
+  const moniker = createMoniker({ sdk, nodes, chain: params.get("moniker").split("/") });
+  const graph = createFollows({ sdk, moniker, nodes, chain: params.get("chain").split("/") });
+  const card = JSON.parse(params.get("card") ?? "null");
+  const address = params.get("address");
+  defineMonikerName(moniker);
+  defineWho(graph, { card: async (a) => (a === address ? card ?? undefined : undefined) });
+  const who = document.createElement("follows-who");
+  who.setAttribute("address", address);
+  const name = document.createElement("moniker-name");
+  name.setAttribute("address", address);
+  name.setAttribute("plain", "");
+  if (card?.name) name.setAttribute("name", card.name);
+  who.append(name);
+  document.querySelector("#who").append(who);
+</script>
+</body>
+</html>
