@@ -2,7 +2,7 @@
 // hand-made writes. Bodies are encoded by the Lattice SDK, whose encoding is
 // pinned to Lattice's vectors.
 //
-//   (cd policy && cargo build --release --target wasm32-unknown-unknown)
+//   policy/build.sh
 //   node --test test/
 //
 // With CONTEXT_DIR set, every context is recorded with its verdict so

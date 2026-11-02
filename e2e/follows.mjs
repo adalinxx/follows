@@ -10,7 +10,7 @@
 // followed Alice's account stays hers. Last, Bob unfollows Carol, and an
 // unfollow of a person followed both ways deletes both.
 //
-//   (cd policy && cargo build --release --target wasm32-unknown-unknown)
+//   policy/build.sh
 //   LATTICE=<lattice-node>/.build/debug/lattice node e2e/follows.mjs
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

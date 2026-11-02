@@ -2,7 +2,7 @@
 // admits a write the way consensus would: every old value must be what the
 // key holds, and the built policy must accept the body.
 //
-//   (cd policy && cargo build --release --target wasm32-unknown-unknown)
+//   policy/build.sh
 //   node --test test/
 import assert from "node:assert/strict";
 import { test } from "node:test";
