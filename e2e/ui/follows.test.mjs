@@ -4,38 +4,30 @@
 // a person shows by the handle they show on Moniker, or their account's
 // tail. Each test is one thing a person does, checked by what the page then
 // shows.
-// Following goes through the real Selfhold wallet extension, holding the
-// person's key, its node the stack's.
+// Following goes through Selfhold's window, where each person makes an
+// account with a passkey (Chromium's virtual authenticator) and approves each
+// write. Nobody the page signs for holds coins: the stack's fee sponsor pays
+// every fee for the device's work. Pop-ups are blocked as for anyone, so a
+// window not opened in a click fails a test.
 //
-//   (cd policy && cargo build --release --target wasm32-unknown-unknown)
-//   cd e2e/ui && npm install && \
-//   LATTICE=<lattice-node>/.build/debug/lattice LATTICE_WALLET=<selfhold>/dist npm test
+//   policy/build.sh
+//   cd e2e/ui && npm install && npx playwright install chromium && \
+//   LATTICE=<lattice-node>/.build/debug/lattice LATTICE_SPONSOR=<lattice-sponsor> \
+//   LATTICE_WALLET_WEB=<selfhold-wallet>/dist-web npm test
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
 import { after, before, test } from "node:test";
 import { chromium, expect as baseExpect } from "playwright/test";
-import { client, newAccount, until } from "./helpers.mjs";
+import { approveInSelfhold, client, declineInSelfhold, newAccount, newSelfholdAccount, selfholdRequests, until, windowText, withSelfhold } from "./helpers.mjs";
 import { FOLLOWS, MONIKER, start } from "./stack.mjs";
-
-const built = process.env.LATTICE_WALLET && fileURLToPath(new URL(process.env.LATTICE_WALLET, `file://${process.cwd()}/`));
-if (!built) throw new Error("LATTICE_WALLET: the built Selfhold extension (its dist/ directory)");
-// Selfhold as installed by someone whose node runs on this machine: allowed
-// to reach it (what Chrome's Allow prompt would grant).
-const installed = mkdtempSync(`${tmpdir()}/follows-ui-wallet-`);
-cpSync(built, installed, { recursive: true });
-const manifest = JSON.parse(readFileSync(`${installed}/manifest.json`, "utf8"));
-const scripts = [manifest.background?.service_worker, ...(manifest.content_scripts ?? []).flatMap((c) => c.js ?? [])].filter(Boolean);
-const absent = scripts.filter((file) => !existsSync(`${installed}/${file}`));
-if (absent.length) throw new Error(`LATTICE_WALLET is an incomplete build, missing ${absent.join(", ")}`);
-manifest.host_permissions = [...manifest.host_permissions, "http://127.0.0.1/*"];
-writeFileSync(`${installed}/manifest.json`, JSON.stringify(manifest));
 
 // Reads walk the trie node by node, and writes wait for a block: generous waits.
 const expect = baseExpect.configure({ timeout: 60_000 });
 
+// Without a GPU (Linux), Chromium's SwiftShader does the fee's work.
+const gpuArgs = process.platform === "linux"
+  ? ["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--use-vulkan=swiftshader", "--use-webgpu-adapter=swiftshader", "--use-angle=swiftshader"]
+  : [];
 const HOSTILE = '<img src=x onerror="window.pwned=1">';
 const FANS = 60;
 
@@ -47,9 +39,14 @@ const p = {}; // the seeded accounts, by name
 before(async () => {
   stack = await start();
   c = client(stack.info.node);
-  for (const name of ["ada", "bob", "cara", "eve", "solo", "popular", "tara", "swapA", "swapB", "drift", "anon", "quiet"]) p[name] = newAccount();
+  for (const name of ["ada", "bob", "cara", "eve", "solo", "popular", "tara", "swapA", "swapB", "drift", "anon", "quiet", "both"]) p[name] = newAccount();
+  p.fans = Array.from({ length: FANS }, newAccount);
+  // The accounts written for here pay their fees in coins, from the miner.
+  const coins = Object.fromEntries([...Object.values(p).filter((who) => who.address), ...p.fans].map((who) => [who.address, 5n]));
+  await stack.info.fund(FOLLOWS, coins);
+  await stack.info.fund(MONIKER, coins);
   // Each claims and shows its handle; Anon and Quiet show none.
-  await Promise.all(["ada", "bob", "cara", "eve", "solo", "popular", "tara", "drift"].map((name) => c.claim(p[name], name)));
+  await Promise.all(["ada", "bob", "cara", "eve", "solo", "popular", "tara", "drift", "both"].map((name) => c.claim(p[name], name)));
   await c.claim(p.swapA, "swap");
   // Following someone who shows a handle follows the handle; Quiet, who shows none, by account.
   await Promise.all([
@@ -62,7 +59,6 @@ before(async () => {
   // Bob also follows Swap's account by account, which stays with it when @swap moves.
   await c.followAccount(p.bob, p.swapA.address);
   // Many followers: each fan claims a handle, then follows @popular; sent together, then waited for.
-  p.fans = Array.from({ length: FANS }, newAccount);
   const fanHandle = (i) => `fan_${String(i).padStart(3, "0")}`;
   for (const [i, fan] of p.fans.entries()) await c.submit(MONIKER, fan, await c.claimActions(fan, fanHandle(i)));
   await until("every fan's handle lands", async () => (await (await c.state.moniker()).get(`name/${fanHandle(FANS - 1)}`)) !== undefined && (await (await c.state.moniker()).get(`name/${fanHandle(0)}`)) !== undefined);
@@ -72,7 +68,10 @@ before(async () => {
     for await (const _ of (await c.state.follows()).list("followers/@popular/")) n++;
     return n === FANS;
   });
-  browser = await chromium.launch();
+  // Pop-ups blocked as for anyone (Playwright turns the blocker off by
+  // default): Selfhold's window opens only from a click, and a test catches
+  // one that doesn't.
+  browser = await chromium.launch({ args: gpuArgs, ignoreDefaultArgs: ["--disable-popup-blocking"] });
 });
 
 after(async () => {
@@ -82,7 +81,8 @@ after(async () => {
 
 /** An account's tail, as the page shows a person with no handle. */
 const tail = (who) => `…${who.address.slice(-4)}`;
-const query = (nodes = [stack.info.node]) => `?node=${nodes.join(",")}&chain=${FOLLOWS.join("/")}&moniker=${MONIKER.join("/")}`;
+const query = (nodes = [stack.info.node]) =>
+  `?node=${nodes.join(",")}&chain=${FOLLOWS.join("/")}&moniker=${MONIKER.join("/")}&sponsor=${stack.info.sponsor}&wallet=${stack.info.walletPage}`;
 const url = (hash, nodes) => `${stack.info.app}${query(nodes)}${hash}`;
 
 /** The page at `hash` for a visitor with no wallet, with what went wrong in it collected on `page.errors`. */
@@ -96,97 +96,52 @@ async function open(hash = "#/", { width = 1100, colorScheme = "light", nodes, b
   return page;
 }
 
-/**
- * A browser with Selfhold holding `who`'s key, its node the stack's, and a
- * page on it. Every wallet window is answered once its button wakes:
- * approved, or declined while `context.decline` is set. Answers are kept on
- * `context.answers`.
- */
-async function withWallet(who) {
-  const context = await chromium.launchPersistentContext(mkdtempSync(`${tmpdir()}/follows-ui-browser-`), {
-    headless: false,
-    viewport: { width: 1100, height: 800 },
-    args: ["--headless=new", `--disable-extensions-except=${installed}`, `--load-extension=${installed}`],
-  });
-  const [worker] = context.serviceWorkers().length ? context.serviceWorkers() : [await context.waitForEvent("serviceworker")];
-  const origin = worker.url().split("/").slice(0, 3).join("/");
-  context.walletOrigin = origin;
-  context.answers = [];
-  context.notes = [];
-  context.on("page", async (opened) => {
-    await opened.waitForLoadState().catch(() => {});
-    if (!opened.url().includes("/approve/index.html")) return;
-    // The approving button wakes only in a focused window, once everything that decides the request has been seen.
-    await opened.bringToFront();
-    const approve = opened.getByRole("button", { name: /^(Connect|Sign write|Pay .+)$/ });
-    const rest = opened.getByRole("button", { name: /^See the rest/ });
-    const deadline = Date.now() + 60_000;
-    while (Date.now() < deadline && !(await approve.isEnabled().catch(() => false))) {
-      if (await rest.isVisible().catch(() => false)) await rest.click().catch(() => {});
-      await opened.waitForTimeout(250);
-    }
-    if (!(await approve.isEnabled().catch(() => false))) {
-      context.notes.push((await opened.locator("body").innerText().catch(() => "?")).replace(/\s+/g, " ").slice(0, 400));
-      return;
-    }
-    const label = (await approve.textContent()).trim();
-    if (context.decline && label !== "Connect") {
-      await opened.getByRole("button", { name: "Decline" }).click();
-      context.answers.push(`declined ${label}`);
-      return;
-    }
-    await approve.click();
-    context.answers.push(label);
-  });
-  const setup = await context.newPage();
-  await setup.goto(`${origin}/popup/index.html`);
-  const created = await setup.evaluate((privHex) => chrome.runtime.sendMessage({ type: "createWallet", password: "follows-test-pass", privHex }), who.keyHex);
-  if (!created?.ok) throw new Error(`wallet setup: ${created?.error}`);
-  await setup.evaluate(async (url) => {
-    const { settings } = await chrome.storage.local.get("settings");
-    const endpoints = { ...(settings?.endpoints ?? {}), Nexus: { url, acceptsSubmit: true, source: "user" } };
-    await chrome.storage.local.set({ settings: { ...settings, nodeMode: "custom", endpoints } });
-  }, stack.info.node);
-  await setup.close();
-  const page = context.pages()[0] ?? (await context.newPage());
+/** A person with Selfhold's window, on the page at `hash`, not yet connected. */
+async function person(hash = "#/") {
+  const context = await browser.newContext({ viewport: { width: 1100, height: 800 } });
+  await withSelfhold(context, stack.info);
+  const page = await context.newPage();
   page.errors = [];
   page.on("pageerror", (error) => page.errors.push(String(error)));
+  await page.goto(url(hash));
   return page;
 }
 
-/** Connects Selfhold from the front page's You, as a person would. */
-async function connect(page) {
-  await page.goto(url("#/"));
-  await page.getByRole("button", { name: "Connect Selfhold" }).click();
-  await expect(page.locator(".mine .handle-row")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Connect Selfhold" })).toHaveCount(0);
-}
-
-/** In Selfhold, the person adds `who`'s key and connects this site to it instead. */
-async function walletSwitchesTo(context, who) {
-  const popup = await context.newPage();
-  await popup.goto(`${context.walletOrigin}/popup/index.html`);
-  const imported = await popup.evaluate((privHex) => chrome.runtime.sendMessage({ type: "importKey", privHex }), who.keyHex);
-  if (!imported?.ok) throw new Error(`wallet import: ${imported?.error}`);
-  await popup.evaluate(async ({ origin, address }) => {
-    const { connections = {} } = await chrome.storage.local.get("connections");
-    await chrome.storage.local.set({ connections: { ...connections, [origin]: address } });
-  }, { origin: new URL(stack.info.app).origin, address: who.address });
-  await popup.close();
-}
-
-/** Runs `body` with a page in a browser holding `who`'s key; on failure, says what the wallet saw. */
-async function asPerson(who, body) {
-  const page = await withWallet(who);
+/** Runs `body` with a person's page at `hash`; on failure, says what Selfhold's window showed. */
+async function asPerson(hash, body) {
+  const page = await person(hash);
   try {
     await body(page);
     assert.deepEqual(page.errors, []);
   } catch (error) {
-    error.message += `\n--- wallet answered: [${page.context().answers}] ${page.context().notes.join(" || ")}`;
+    error.message += `\n--- Selfhold's window: ${await windowText(page.context())}`;
     throw error;
   } finally {
     await page.context().close();
   }
+}
+
+/** Connects from the front page's You, making a new account with a passkey in Selfhold's window: its address. */
+async function connect(page) {
+  await page.goto(url("#/"));
+  const me = await newSelfholdAccount(page, page.getByRole("button", { name: "Connect Selfhold" }));
+  await expect(page.locator(".mine .handle-row")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Connect Selfhold" })).toHaveCount(0);
+  return me;
+}
+
+/**
+ * While on, each of the page's reads from the node waits `ms` first: what
+ * the page does in a click must not wait for them, or the browser blocks
+ * Selfhold's window. Selfhold's own reads, from its window, are not held.
+ */
+async function slowNode(page, ms = 1500) {
+  const slow = { on: false };
+  await page.route(`${stack.info.node}/**`, async (route) => {
+    if (slow.on) await new Promise((resolve) => setTimeout(resolve, ms));
+    await route.continue().catch(() => {});
+  });
+  return slow;
 }
 
 const title = (page) => page.locator("main h1");
@@ -205,8 +160,8 @@ async function close(page) {
   assert.deepEqual(page.errors, []);
   await page.context().close();
 }
-/** Whether `who` holds a follow key for `t` on the chain: an address, or `@h`. */
-const keyed = (who, t) => c.keyed(who, t);
+/** Whether `who` (an account, or its address) holds a follow key for `t` on the chain: an address, or `@h`. */
+const keyed = (who, t) => c.keyed(typeof who === "string" ? { address: who } : who, t);
 
 // ---------------------------------------------------------------- finding people
 
@@ -216,8 +171,9 @@ test("the front page says what Follows is and puts the cursor in the search", as
   await expect(page.locator("#search")).toBeFocused();
   await expect(page.locator("#search")).toHaveAttribute("placeholder", "Search @handle");
   await expect(page.locator(".recent")).toHaveCount(0);
-  // No wallet: nothing about you.
-  await expect(page.locator(".mine")).toBeHidden();
+  // Not connected: You offers Selfhold's window, and says nothing costs coins.
+  await expect(page.locator(".mine")).toContainText("No coins needed");
+  await expect(page.getByRole("button", { name: "Connect Selfhold" })).toBeVisible();
   await close(page);
 });
 
@@ -470,70 +426,60 @@ test("a malformed link shows a message, not a blank page", async () => {
   await close(page);
 });
 
-// ---------------------------------------------------------------- following, with Selfhold
+// ---------------------------------------------------------------- following, with Selfhold's window
 
-test("without a wallet, Follow says how to get one; on a phone, to use a computer", async () => {
-  let page = await open("#/@tara");
-  await followButton(page).click();
-  await expect(note(page)).toContainText("To follow, add Selfhold, a free browser extension");
-  await expect(note(page).locator("a")).toHaveAttribute("href", /chromewebstore\.google\.com/);
-  await close(page);
-  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E148" });
-  page = await phone.newPage();
-  page.errors = [];
-  await page.goto(url("#/@tara"));
-  await followButton(page).click();
-  await expect(note(page)).toHaveText("Following needs Selfhold, a Chrome extension for computers. Open this page on a computer to follow.");
-  await close(page);
-});
-
-test("following: Selfhold connects and signs, the button turns at once, the note says saving, then Saved", async () => {
-  const fan = newAccount();
-  await c.claim(fan, "fan_one");
-  await asPerson(fan, async (page) => {
-    await page.goto(url("#/@tara"));
+test("following: Follow connects Selfhold first, the next press follows, the fee is paid in work, then Saved", async () => {
+  await asPerson("#/@tara", async (page) => {
     await expect(counts(page).first()).toHaveText(/^\d+ followers?$/);
     const before = Number((await counts(page).first().textContent()).match(/\d+/)[0]);
     await expect(followButton(page)).toHaveText("Follow @tara");
     await expect(followButton(page)).toHaveAccessibleName("Follow @tara");
-    await followButton(page).click();
+    // Connecting takes the click Selfhold's window needs: nothing is sent yet.
+    const me = await newSelfholdAccount(page, followButton(page));
+    await expect(note(page)).toHaveText("Connected. Press Follow to follow.");
+    await expect(followButton(page)).toHaveText("Follow @tara");
+    assert.ok(!(await keyed(me, "@tara")));
+    await approveInSelfhold(page, followButton(page));
     await expect(followButton(page)).toHaveText("Following @tara");
     await expect(followButton(page)).toHaveAccessibleName("Following @tara");
     await expect(note(page)).toHaveText("Saved.", { timeout: 180_000 });
     // "Saved." only once the chain holds it: the handle, followed by the account.
-    assert.ok(await keyed(fan, "@tara"));
+    assert.ok(await keyed(me, "@tara"));
     await expect(counts(page).first()).toHaveText(`${before + 1} follower${before === 0 ? "" : "s"}`);
-    assert.deepEqual(page.context().answers, ["Connect", "Sign write"]);
+    // No coins: the sponsor paid the fee for this device's work.
+    assert.equal(await c.coins(FOLLOWS, me), 0n);
+    assert.equal(await selfholdRequests(page), 2);
     await expect(note(page)).toHaveText("", { timeout: 10_000 });
   });
 });
 
-test("no handle is needed to follow", async () => {
-  const fan = newAccount();
-  await asPerson(fan, async (page) => {
+test("Selfhold's window opens in the click though the node is slow, and no handle is needed to follow", async () => {
+  await asPerson("#/", async (page) => {
+    const slow = await slowNode(page);
+    const me = await connect(page);
     await page.goto(url("#/@tara"));
     await expect(followButton(page)).toHaveText("Follow @tara");
-    await followButton(page).click();
+    // Every read takes 1.5 s now: the follow's reads, together, far longer than a click lets a window wait.
+    slow.on = true;
+    await approveInSelfhold(page, followButton(page));
+    slow.on = false;
     await expect(note(page)).toHaveText("Saved.", { timeout: 180_000 });
-    assert.ok(await keyed(fan, "@tara"));
-    assert.deepEqual(page.context().answers, ["Connect", "Sign write"]);
+    assert.ok(await keyed(me, "@tara"));
     await page.goto(url("#/@tara/followers"));
-    await expect(rows(page).filter({ hasText: tail(fan) })).toHaveCount(1);
+    await expect(rows(page).filter({ hasText: tail({ address: me }) })).toHaveCount(1);
   });
 });
 
 test("someone with no handle is followed by account, from their page", async () => {
-  const fan = newAccount();
-  await c.claim(fan, "fan_acct");
-  await asPerson(fan, async (page) => {
-    await connect(page);
+  await asPerson("#/", async (page) => {
+    const me = await connect(page);
     await page.goto(url(`#/${p.quiet.address}`));
     await expect(counts(page)).toHaveText(["1 follower", "0 following"]);
     await expect(followButton(page)).toHaveText("Follow");
-    await followButton(page).click();
+    await approveInSelfhold(page, followButton(page));
     await expect(followButton(page)).toHaveText("Following");
     await expect(note(page)).toHaveText("Saved.", { timeout: 180_000 });
-    assert.ok(await keyed(fan, p.quiet.address));
+    assert.ok(await keyed(me, p.quiet.address));
     await expect(counts(page)).toHaveText(["2 followers", "0 following"]);
     // Quiet shows a handle later: the follow by account still counts.
     await c.claim(p.quiet, "quiet");
@@ -546,144 +492,115 @@ test("someone with no handle is followed by account, from their page", async () 
 });
 
 test("Following shows Unfollow under a mouse, and pressing it unfollows", async () => {
-  const fan = newAccount();
-  await c.claim(fan, "fan_two");
-  await c.follow(fan, "@tara");
-  await asPerson(fan, async (page) => {
-    await connect(page);
+  await asPerson("#/", async (page) => {
+    const me = await connect(page);
     await page.goto(url("#/@tara"));
+    await approveInSelfhold(page, followButton(page));
+    await expect(note(page)).toHaveText("Saved.", { timeout: 180_000 });
     await expect(followButton(page)).toHaveText("Following @tara");
     await followButton(page).hover();
     await expect(followButton(page).locator(".now")).toBeHidden();
     assert.equal(await followButton(page).evaluate((b) => getComputedStyle(b, "::after").content), '"Unfollow @tara"');
-    await followButton(page).click();
+    await approveInSelfhold(page, followButton(page));
     await expect(followButton(page)).toHaveText("Follow @tara");
     await expect(note(page)).toHaveText(SAVING);
     await expect(note(page)).toHaveText("Saved.", { timeout: 180_000 });
-    assert.ok(!(await keyed(fan, "@tara")));
+    assert.ok(!(await keyed(me, "@tara")));
   });
 });
 
-test("unfollowing someone followed both ways deletes both", async () => {
-  const fan = newAccount();
-  await c.claim(fan, "fan_both");
-  await c.follow(fan, "@tara");
-  await c.followAccount(fan, p.tara.address);
-  await asPerson(fan, async (page) => {
-    await connect(page);
-    await page.goto(url("#/@tara"));
-    await expect(followButton(page)).toHaveText("Following @tara");
-    await followButton(page).click();
+test("unfollowing someone followed both ways deletes both, in one write", async () => {
+  await asPerson("#/", async (page) => {
+    const me = await connect(page);
+    // By handle while Both shows it…
+    await page.goto(url("#/@both"));
+    await approveInSelfhold(page, followButton(page));
     await expect(note(page)).toHaveText("Saved.", { timeout: 180_000 });
-    assert.ok(!(await keyed(fan, "@tara")));
-    assert.ok(!(await keyed(fan, p.tara.address)));
-    assert.deepEqual(page.context().answers, ["Connect", "Sign write"]);
+    // …and by account while it shows none.
+    await c.stopShowing(p.both);
+    await page.goto(url(`#/${p.both.address}`));
+    await page.reload();
+    await expect(followButton(page)).toHaveText("Follow");
+    await approveInSelfhold(page, followButton(page));
+    await expect(note(page)).toHaveText("Saved.", { timeout: 180_000 });
+    assert.ok(await keyed(me, "@both"));
+    assert.ok(await keyed(me, p.both.address));
+    await c.show(p.both, "both");
+    await page.goto(url("#/@both"));
+    await page.reload();
+    await expect(followButton(page)).toHaveText("Following @both");
+    const asked = await selfholdRequests(page);
+    await approveInSelfhold(page, followButton(page));
+    await expect(note(page)).toHaveText("Saved.", { timeout: 180_000 });
+    assert.ok(!(await keyed(me, "@both")));
+    assert.ok(!(await keyed(me, p.both.address)));
+    assert.equal(await selfholdRequests(page), asked + 1);
   });
 });
 
-test("you are on the front page: your handle, your counts and your lists", async () => {
-  await asPerson(p.ada, async (page) => {
-    await connect(page);
-    const mine = page.locator(".mine .handle-row");
-    await expect(page.locator(".mine h2")).toHaveText("You");
-    await expect(mine.locator("strong")).toHaveText("@ada");
-    await expect(mine.locator(".row-counts a")).toHaveText([/^\d+ followers?$/, /^\d+ following$/]);
-    await expect(page.locator(".mine #pick")).toHaveCount(0);
-    await mine.getByRole("link", { name: /following$/ }).click();
-    await expect(title(page)).toHaveText("@ada follows");
-    await page.goto(url("#/"));
-    await page.locator(".mine .handle-row a").first().click();
-    await expect(title(page)).toHaveText("@ada");
-    // Your own page has no Follow button.
-    await expect(page.locator("follows-button")).toBeHidden();
-  });
-});
-
-test("showing no handle, you see your account's tail, and Show a handle claims one in the page", async () => {
-  const fresh = newAccount();
-  await asPerson(fresh, async (page) => {
-    await connect(page);
-    await expect(page.locator(".mine .handle-row strong")).toHaveText(tail(fresh));
+test("you on the front page: your account's tail, then a handle claimed in the page, coinlessly, though the node is slow", async () => {
+  await asPerson("#/", async (page) => {
+    const slow = await slowNode(page);
+    const me = await connect(page);
+    await expect(page.locator(".mine > h2")).toHaveText("You");
+    await expect(page.locator(".mine .handle-row strong")).toHaveText(tail({ address: me }));
     await expect(page.locator(".mine")).toContainText("You show no @handle, so apps show your account's tail.");
     await page.getByRole("button", { name: "Show a handle" }).click();
     const dialog = page.locator("moniker-handle-picker dialog");
     await expect(dialog).toBeVisible();
     await dialog.getByLabel("Or claim a free one").fill("fresh_one");
-    await dialog.getByRole("button", { name: "Use handle" }).click();
+    // The claim's reads take far longer than a click lets a window wait.
+    slow.on = true;
+    await approveInSelfhold(page, dialog.getByRole("button", { name: "Use handle" }));
+    slow.on = false;
     // Once Moniker shows it, You shows it.
     await expect(page.locator(".mine .handle-row strong")).toHaveText("@fresh_one", { timeout: 180_000 });
     await expect(page.locator(".mine #pick")).toHaveCount(0);
-    assert.deepEqual(page.context().answers, ["Connect", "Sign write"]);
-  });
-});
-
-test("declining in Selfhold sends nothing and says so", async () => {
-  const fan = newAccount();
-  await c.claim(fan, "fan_three");
-  await asPerson(fan, async (page) => {
-    await connect(page);
-    page.context().decline = true;
-    await page.goto(url("#/@tara"));
-    await followButton(page).click();
-    await expect(note(page)).toHaveText("Canceled in Selfhold. Nothing was sent.");
-    await expect(followButton(page)).toHaveText("Follow @tara");
-    assert.ok(!(await keyed(fan, "@tara")));
-  });
-});
-
-test("on your own page, by handle or account, there is no Follow button; on others there is", async () => {
-  await asPerson(p.tara, async (page) => {
-    await connect(page);
-    await page.goto(url("#/@tara"));
+    assert.equal(await c.coins(MONIKER, me), 0n);
+    const mine = page.locator(".mine .handle-row");
+    await expect(mine.locator(".row-counts a")).toHaveText(["0 followers", "0 following"]);
+    await mine.getByRole("link", { name: /following$/ }).click();
+    await expect(title(page)).toHaveText("@fresh_one follows");
+    // Your own page, by handle or account, has no Follow button; others' do.
+    await page.goto(url("#/@fresh_one"));
     await expect(counts(page).first()).toHaveText(/follower/);
     await expect(page.locator("follows-button")).toBeHidden();
-    await page.goto(url(`#/${p.tara.address}`));
-    await expect(title(page)).toHaveText("@tara");
+    await page.goto(url(`#/${me}`));
+    await expect(title(page)).toHaveText("@fresh_one");
     await expect(page.locator("follows-button")).toBeHidden();
     await page.goto(url("#/@ada"));
     await expect(followButton(page)).toHaveText("Follow @ada");
   });
 });
 
-test("connecting during the click as the page's own account follows nothing", async () => {
-  await asPerson(p.solo, async (page) => {
-    await page.goto(url("#/@solo"));
-    await expect(followButton(page)).toHaveText("Follow @solo");
-    await followButton(page).click();
-    await expect(page.locator("follows-button")).toBeHidden();
-    assert.deepEqual(page.context().answers, ["Connect"]);
-  });
-});
-
-test("connecting during the click when already following shows Following and sends nothing", async () => {
-  const fan = newAccount();
-  await c.follow(fan, "@tara");
-  await asPerson(fan, async (page) => {
+test("declining in Selfhold sends nothing and says so", async () => {
+  await asPerson("#/", async (page) => {
+    const me = await connect(page);
     await page.goto(url("#/@tara"));
     await expect(followButton(page)).toHaveText("Follow @tara");
-    await followButton(page).click();
-    await expect(followButton(page)).toHaveText("Following @tara");
-    assert.deepEqual(page.context().answers, ["Connect"]);
-    assert.ok(await keyed(fan, "@tara"));
+    await declineInSelfhold(page, followButton(page));
+    await expect(note(page)).toHaveText("Canceled in Selfhold. Nothing was sent.");
+    await expect(followButton(page)).toHaveText("Follow @tara");
+    assert.ok(!(await keyed(me, "@tara")));
   });
 });
 
-test("a follow still waiting for a block, sent from anywhere, shows as saving until it lands", async () => {
-  const fan = newAccount();
-  await c.claim(fan, "fan_four");
+test("a follow still waiting for a block shows as saving, on this visit and the next, until it lands", async () => {
   const mining = (verb) => execFileSync(process.env.LATTICE, ["mine", verb, "--root", stack.info.root], { stdio: "pipe" });
-  await asPerson(fan, async (page) => {
+  await asPerson("#/", async (page) => {
     await connect(page);
+    await page.goto(url("#/@tara"));
+    await expect(followButton(page)).toHaveText("Follow @tara");
     mining("stop");
     try {
-      // Sent by another app: this page never asked the wallet for it.
-      await c.submit(FOLLOWS, fan, await c.followActions(fan, "@tara"));
-      await page.goto(url("#/@tara"));
+      await approveInSelfhold(page, followButton(page));
+      await expect(note(page)).toHaveText(SAVING);
+      // A new visit finds it in the node's mempool.
+      await page.reload();
       await expect(followButton(page)).toHaveText("Following @tara");
       await expect(note(page)).toHaveText(SAVING);
       mining("start");
       await expect(note(page)).toHaveText("Saved.", { timeout: 180_000 });
-      assert.deepEqual(page.context().answers, ["Connect"]);
     } finally {
       // Started again however the test went; already running is fine.
       try {
@@ -693,30 +610,18 @@ test("a follow still waiting for a block, sent from anywhere, shows as saving un
   });
 });
 
-test("after Selfhold switches account, a press sends nothing, shows that account's follow, and says so", async () => {
-  const [x, y] = [newAccount(), newAccount()];
-  await Promise.all([c.claim(x, "switch_x"), c.claim(y, "switch_y")]);
-  await c.follow(x, "@tara");
-  await asPerson(x, async (page) => {
+test("when this site's Selfhold account changes, a press sends nothing, shows that account's follow, and says so", async () => {
+  await asPerson("#/", async (page) => {
     await connect(page);
-    await page.goto(url("#/@tara"));
-    await expect(followButton(page)).toHaveText("Following @tara");
-    await walletSwitchesTo(page.context(), y);
-    // Unfollow pressed as Y: X's follow is not Y's to undo.
+    await page.goto(url("#/@ada"));
+    await expect(followButton(page)).toHaveText("Follow @ada");
+    // Another of the person's accounts, which follows @ada, is given to this site in another tab.
+    await page.evaluate(({ origin, address }) => localStorage.setItem(`selfhold.web.address ${origin}`, address), { origin: page.context().walletOrigin, address: p.bob.address });
+    const asked = await selfholdRequests(page);
     await followButton(page).click();
     await expect(note(page)).toHaveText("Selfhold is connected to another account now. Check, then press again.");
-    await expect(followButton(page)).toHaveText("Follow @tara");
-    assert.ok(await keyed(x, "@tara"));
-    assert.deepEqual(page.context().answers, ["Connect"]);
-    // Pressed again, Y follows.
-    await followButton(page).click();
-    await expect(note(page)).toHaveText("Saved.", { timeout: 180_000 });
-    assert.ok(await keyed(y, "@tara"));
-    // Switched to Tara's own account: no Follow button on her page.
-    await walletSwitchesTo(page.context(), p.tara);
-    await expect(note(page)).toHaveText("", { timeout: 10_000 });
-    await followButton(page).click();
-    await expect(page.locator("follows-button")).toBeHidden();
+    await expect(followButton(page)).toHaveText("Following @ada");
+    assert.equal(await selfholdRequests(page), asked);
   });
 });
 
@@ -727,8 +632,8 @@ const otherApp = (who, card) =>
   `${new URL("../e2e/ui/who.html", stack.info.app)}${query()}&address=${who.address}${card ? `&card=${encodeURIComponent(JSON.stringify(card))}` : ""}`;
 
 test("in another app, a name opens the same card: the app's name for them, their handle, counts, Follow, links", async () => {
-  const fan = newAccount();
-  await asPerson(fan, async (page) => {
+  await asPerson("#/", async (page) => {
+    const me = await connect(page);
     await page.goto(otherApp(p.tara, { name: "@Tara <b>Okafor</b>", bio: "Eats @ noon" }));
     const name = page.locator("follows-who moniker-name");
     await expect(name).toContainText("@tara");
@@ -752,9 +657,9 @@ test("in another app, a name opens the same card: the app's name for them, their
     // Follow works from the card.
     const follow = card.locator("follows-button button");
     await expect(follow).toHaveText("Follow @tara");
-    await follow.click();
+    await approveInSelfhold(page, follow);
     await expect(card.locator("follows-button .note")).toHaveText("Saved.", { timeout: 180_000 });
-    assert.ok(await keyed(fan, "@tara"));
+    assert.ok(await keyed(me, "@tara"));
     // Escape closes it, and focus goes back to the name.
     await follow.focus();
     await page.keyboard.press("Escape");

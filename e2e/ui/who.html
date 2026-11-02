@@ -12,12 +12,14 @@
   <p>A review by <span id="who"></span></p>
 </main>
 <script type="module">
-  // ?node=, ?chain=, ?moniker=, ?address= and ?card= (JSON) say what to read and show.
+  // ?node=, ?chain=, ?moniker=, ?address= and ?card= (JSON) say what to read and show;
+  // ?sponsor= and ?wallet=, where Selfhold's window has its fees paid in work.
   import * as sdk from "../../vendor/lattice-sdk.js";
   import { createFollows } from "../../src/index.mjs";
   import { defineWho } from "../../src/who.mjs";
   import { createMoniker } from "../../app/vendor/moniker-sdk/src/index.mjs";
   import { defineMonikerName } from "../../app/vendor/moniker-sdk/src/element.mjs";
+  import { selfhold } from "../../app/vendor/selfhold.mjs";
   const params = new URLSearchParams(location.search);
   const nodes = params.get("node").split(",");
   const moniker = createMoniker({ sdk, nodes, chain: params.get("moniker").split("/") });
@@ -25,7 +27,8 @@
   const card = JSON.parse(params.get("card") ?? "null");
   const address = params.get("address");
   defineMonikerName(moniker);
-  defineWho(graph, { card: async (a) => (a === address ? card ?? undefined : undefined) });
+  const wallet = selfhold({ use: "window", wallet: params.get("wallet"), hosts: () => nodes, sponsor: () => params.get("sponsor") });
+  defineWho(graph, { card: async (a) => (a === address ? card ?? undefined : undefined), wallet: () => wallet });
   const who = document.createElement("follows-who");
   who.setAttribute("address", address);
   const name = document.createElement("moniker-name");

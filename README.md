@@ -46,13 +46,21 @@ account. So:
 
 ## The page
 
-Live at https://adalinxx.github.io/follows/app/, reading the testnet trial.
+Live at https://adalinxx.github.io/follows/app/, reading the Follows testnet
+trial and Moniker on `Nexus/moniker`.
 
 `app/` is a static page: search a `@handle` or an account to see how many
 follow them and how many they follow, and both lists. People show by the
 handle they show, or by their account's last four characters when they show
 none; each links to their page, and long lists have a filter. Follow them
-with the button: no handle needed. With Selfhold connected, the front page
+with the button: no handle needed, and no coins. Writes go to Selfhold's
+window at `wallet.selfhold.app`: a passkey makes the account, with nothing to
+install, and the fee sponsor
+(`https://lattice-testnet-apps-iad.fly.dev:8650/sponsor`, lattice-sponsor)
+takes a moment of the device's work for each fee. Its client is
+`app/vendor/selfhold.mjs`, the same build Stoa and Moniker vendor;
+`?sponsor=` names another sponsor (empty for none: the account's coins pay)
+and `?wallet=` another Selfhold window. With Selfhold connected, the front page
 shows you, with your counts and lists; showing no handle, it offers Moniker's
 handle picker to claim or show one without leaving the page. Who shows which
 handle is read from Moniker through
@@ -68,9 +76,10 @@ python3 -m http.server 8767   # from the repository root, then open http://127.0
 
 ```js
 import { createFollows, defineFollowButton, defineWho } from "https://cdn.jsdelivr.net/gh/adalinxx/follows@v0.4.0/src/browser.mjs";
-import { createMoniker } from "https://cdn.jsdelivr.net/gh/adalinxx/moniker-sdk@v0.3.0/src/browser.mjs";
+import { createMoniker } from "https://cdn.jsdelivr.net/gh/adalinxx/moniker-sdk@2c3491b/src/browser.mjs";
+import { selfhold } from "./selfhold.mjs";        // @selfhold/web, from selfhold-wallet
 
-const moniker = createMoniker();
+const moniker = createMoniker();                   // Nexus/moniker
 const graph = createFollows({ moniker });          // testnet trial by default; or { nodes, chain }
 await graph.person("@ada");                        // { account, handle: "ada" }, or { handle } if no account shows it
 await graph.following(address);                    // whom it follows: [{ account, handle? } | { handle }, …]
@@ -79,14 +88,24 @@ await graph.followers("@ada");                     // the accounts following Ada
 await graph.counts(address);                       // { followers, following }
 await graph.follows(address, "@bob");              // true or false
 
-const wallet = window.lattice;                     // Selfhold
-await graph.follow("@bob", { wallet });            // Bob's handle if he shows one, else his account; undefined if already
+// Selfhold's window, its fees paid with the device's work through a fee sponsor:
+const wallet = selfhold({ use: "window", hosts: () => graph.nodes, sponsor: () => SPONSOR });
+await wallet.connect();                            // from a click
+await graph.follow("@bob", { wallet });            // from a later click: Bob's handle if he shows one, else his account; undefined if already
 await graph.unfollow(bobAddress, { wallet });      // deletes this account's keys for Bob, by account and by handle
 ```
 
 Anywhere a person goes, an account address or a handle (with or without
 `@`) will do; a handle spelled like an address needs its `@`. Nobody follows
 themselves.
+
+The wallet picks the fee: Follows proposes none unless `createFollows` is
+given a `fee`. Selfhold's window opens only in direct answer to a click, so
+`follow` and `unfollow` hand it the write as a promise at once and read the
+chain while it opens; connect in an earlier click, since connecting uses that
+click up. Any other wallet with `writeRecords`, such as Selfhold for Chrome
+(`window.lattice`, which pays fees in coins), is asked once the write is
+built.
 
 ### Showing people in your app
 
@@ -99,7 +118,7 @@ filter by `graph.followingAccounts(reader)`, and show a person's
 A Follow button for any page, which asks Selfhold only when pressed:
 
 ```js
-defineFollowButton(graph);
+defineFollowButton(graph, { wallet: () => wallet });  // without it, Selfhold for Chrome
 ```
 
 ```html
@@ -109,7 +128,8 @@ defineFollowButton(graph);
 
 It reads "Follow @ada" / "Following @ada", or just "Follow" for someone who
 shows no handle. It follows as the connected account, and hides on that
-account's own page.
+account's own page. A press that has to connect Selfhold's window first
+connects, shows where the account stands, and asks for one more press.
 
 A follow takes about a block (a minute on the trial) to save. The button
 turns at once and its note says "Saving… about a minute." until a block
@@ -128,7 +148,7 @@ they show (or their account's tail), their counts, a Follow button, and
 links to their Follows and Moniker pages.
 
 ```js
-defineWho(graph, { card: async (address) => ({ name, photo, bio }) });   // your app's card, or undefined
+defineWho(graph, { card: async (address) => ({ name, photo, bio }), wallet: () => wallet });   // your app's card, or undefined
 ```
 
 ```html
@@ -144,7 +164,8 @@ Reads go to the first node that answers. Every trie node is checked against
 its CID, so a read doesn't depend on trusting the node that served it.
 Handles are resolved from one Moniker state, all at once. Writes go to the
 person's wallet, which shows each one and signs it. The library never holds
-a key. Writes are free on the testnet trial.
+a key. The hosts ask a fee on each write, which the fee sponsor pays for
+work.
 
 In Node, or with your own copy of the Lattice SDK, import `src/index.mjs` and
 pass the SDK in: `createFollows({ sdk, moniker })`. `moniker` needs only
@@ -167,7 +188,7 @@ returns them.
 ## Test
 
 ```sh
-(cd policy && cargo build --release --target wasm32-unknown-unknown)
+policy/build.sh                                   # the module, naming no machine
 npm test                                          # the policy, and the records through it
 LATTICE=<lattice-node>/.build/debug/lattice node e2e/follows.mjs   # against a real node
 
@@ -177,24 +198,33 @@ CONTEXT_DIR=.contexts node --test test/policy.test.mjs
 ```
 
 The page's acceptance tests run it in Chromium against a private node with a
-Follows chain and a Moniker chain (under Moniker's own policy, copied into
-`e2e/ui/moniker/`):
+Follows chain and a Moniker chain (under the module `Nexus/moniker` launched
+with, copied into `e2e/ui/moniker/`), both asking a fee of 1 as the testnet
+hosts do; a fee sponsor (lattice-sponsor) that pays it for work; and
+Selfhold's window (selfhold-wallet's `dist-web/`, served on `localhost`):
 
 ```sh
-cd e2e/ui && npm install && \
-  LATTICE=<lattice-node>/.build/debug/lattice LATTICE_WALLET=<selfhold>/dist npm test
+cd e2e/ui && npm install && npx playwright install chromium && \
+  LATTICE=<lattice-node>/.build/debug/lattice LATTICE_SPONSOR=<lattice-sponsor> \
+  LATTICE_WALLET_WEB=<selfhold-wallet>/dist-web npm test
 ```
 
-Following goes through the real Selfhold extension, holding each person's
-key. They cover search by handle and by account, both lists with people
-shown by handle or account tail, counts, the filter, navigation and links,
-empty lists, hostile input, a handle no account shows, a handle given to
-another key (its followers move, the old account keeps its own), unfollows,
+`LATTICE_SPONSOR` defaults to `lattice-sponsor` beside `lattice`. Each person
+makes an account with a passkey in Selfhold's window (Chromium's virtual
+authenticator) and approves each write there; nobody the page signs for holds
+coins, and tests check they still hold none. Pop-ups are blocked as for
+anyone, and some tests hold every read the page makes for 1.5 s, so a window
+not opened in the click fails. They cover search by handle and by account,
+both lists with people shown by handle or account tail, counts, the filter,
+navigation and links, empty lists, hostile input, a handle no account shows,
+a handle given to another key (its followers move, the old account keeps its
+own), unfollows, connecting from Follow and following on the next press,
 following with no handle, following an account with no handle, unfollowing
-someone followed both ways, you on the front page and its handle picker,
-declining in Selfhold, your own page, a long list, a follow pending in the
-mempool, a switched account, `<follows-who>` in another app's page, a slow
-page overtaken by a newer one, dead nodes, phone width and dark mode.
+someone followed both ways, you on the front page and claiming a handle with
+its picker, declining in Selfhold, your own page, a long list, a follow
+pending in the mempool, a changed account, `<follows-who>` in another app's
+page, a slow page overtaken by a newer one, dead nodes, phone width and dark
+mode.
 
 The e2e test launches the chain from `chain/spec.json` and a Moniker chain on
 a private node. Alice and Bob show @ada and @bob; Carol shows none. Alice and
