@@ -24,7 +24,7 @@ import { writeRequest } from "./records/wallet.mjs";
 
 /** Where Follows lives now: its testnet trial chain and the shared hosts. */
 export const DEFAULTS = {
-  chain: ["Nexus", "testnet", "follows-ade46a"],
+  chain: ["Nexus", "testnet", "follows-17e400"],
   nodes: ["https://lattice-testnet-apps-iad.fly.dev", "https://lattice-testnet-apps-ams.fly.dev"],
   // How long a read state is reused before asking for the tip again.
   freshFor: 10_000,
