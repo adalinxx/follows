@@ -8,10 +8,10 @@
 //   <follows-button target="@ada"></follows-button>
 //   <follows-button target="bafyrei…"></follows-button>
 //
-// It says whom it follows, "Follow @ada", when they show a handle, and
-// follows that handle; for someone with none it says "Follow" and follows
-// their account. No handle is needed to follow. It hides on the connected
-// account itself.
+// It follows the person's account: for a handle, the account showing it.
+// It says "Follow @ada" when they show a handle, else "Follow"; no handle
+// is needed to follow. It hides on the connected account itself, and for a
+// handle no account shows, as there is no one to follow.
 //
 // A follow takes about a block to save: the button shows the new state at
 // once, and its note says it is saving until the chain shows it, then
@@ -128,15 +128,10 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         this.#button.toggleAttribute("aria-busy", state === "loading");
         this.#note.innerHTML = note;
       }
-      /** The keys a change to this person's follow is saved under: their account and their handle. */
-      #forms() {
-        return [this.#who?.account, this.#who?.handle === undefined ? undefined : `@${this.#who.handle}`].filter(Boolean);
-      }
       /** Whether a change to this follow waits in a mempool, and which way: true, false, or undefined. */
       async #waiting(me) {
         const pending = await graph.pending(me).catch(() => ({}));
-        const found = this.#forms().filter((t) => t in pending);
-        return found.length === 0 ? undefined : found.some((t) => pending[t]);
+        return this.#who?.account === undefined ? undefined : pending[this.#who.account];
       }
       /**
        * Whom the target names, and whether the connected account follows
@@ -152,8 +147,8 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
           if (ticket !== this.#drawn) return;
           this.#who = who;
           this.#me = me ?? null;
-          // Nobody follows themselves here.
-          if (me && who.account === me) {
+          // Nobody follows themselves here, nor a handle no account shows.
+          if (who.account === undefined || (me && who.account === me)) {
             this.hidden = true;
             return;
           }

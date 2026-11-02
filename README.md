@@ -8,14 +8,14 @@ Follows is its own Lattice chain. It holds follows and nothing else.
 
 ## Records
 
-An account follows an account, or a handle. Handles are names on
+An account follows an account. People may be named by a handle, a name on
 [Moniker](https://github.com/adalinxx/moniker), the names chain: an account
 owns `@<h>` there, points it at an account, and an account shows `@<h>` in
 every app while it names `h` and `h` points back at it. A handle is
 lowercase letters, digits and `_`. Accounts never need a handle to follow.
 
-Account `<a>` following `<t>` is two keys, so that each end of the graph is
-one prefix read. `<t>` is an account address, or `@` and a handle:
+Account `<a>` following account `<t>` is two keys, so that each end of the
+graph is one prefix read:
 
 | Key | Lists |
 | --- | --- |
@@ -25,24 +25,20 @@ one prefix read. `<t>` is an account address, or `@` and a handle:
 `<a>` signs: only it writes or deletes its keys, always both in one
 transaction, to the same value, the `followers/` key directly after its
 `follows/` twin; clients write `"1"`. The chain starts with neither, so the
-two lists always agree. The policy checks only these shapes and that `<a>`
-signs.
+two lists always agree. The policy checks only these shapes, that both ends
+are account addresses, and that `<a>` signs: a handle is never a key.
 
-Following someone who shows a handle follows the handle; following someone
-who shows none follows their account. This chain can't see Moniker, so
-readers resolve handles: `@h` stands for the account it points at, while
-that account shows `h`, the same test every app uses to show `@h` beside an
-account. So:
+This chain can't see Moniker, so clients resolve handles: `@h` stands for
+the account it points at, while that account shows `h`, the same test every
+app uses to show `@h` beside an account. Following `@h` follows that
+account, as it is when the follow is made. So:
 
-- A person's followers are the accounts following their account, and those
-  following the handle they show now, each account once.
-- Whom an account follows is one entry a person. A followed handle that no
-  account shows now stays on the list as `@h`, and counts for whoever shows
-  it next.
+- A person's followers are the accounts following their account.
 - When a handle moves to another key (given, sold, or its owner moving to a
-  new key), its followers follow that key. Followers of the old account stay
-  with the account. An account's own follows are its own: renaming or giving
-  away a handle never touches them.
+  new key), the follows stay with the accounts: the old account keeps its
+  followers and its follows, and `@h` names the new key, followed by no one
+  until someone follows it.
+- A handle no account shows names no one, and can't be followed.
 
 ## The page
 
@@ -82,17 +78,17 @@ import { selfhold } from "./selfhold.mjs";        // @selfhold/web, from selfhol
 const moniker = createMoniker();                   // Nexus/moniker
 const graph = createFollows({ moniker });          // testnet trial by default; or { nodes, chain }
 await graph.person("@ada");                        // { account, handle: "ada" }, or { handle } if no account shows it
-await graph.following(address);                    // whom it follows: [{ account, handle? } | { handle }, …]
+await graph.following(address);                    // whom it follows: [{ account, handle? }, …]
 await graph.followingAccounts(address);            // the accounts it follows, each once: build a feed from these
-await graph.followers("@ada");                     // the accounts following Ada's account or handle, each once
+await graph.followers("@ada");                     // the accounts following the account showing @ada
 await graph.counts(address);                       // { followers, following }
 await graph.follows(address, "@bob");              // true or false
 
 // Selfhold's window, its fees paid with the device's work through a fee sponsor:
 const wallet = selfhold({ use: "window", hosts: () => graph.nodes, sponsor: () => SPONSOR });
 await wallet.connect();                            // from a click
-await graph.follow("@bob", { wallet });            // from a later click: Bob's handle if he shows one, else his account; undefined if already
-await graph.unfollow(bobAddress, { wallet });      // deletes this account's keys for Bob, by account and by handle
+await graph.follow("@bob", { wallet });            // from a later click: the account showing @bob; undefined if already
+await graph.unfollow(bobAddress, { wallet });      // deletes this account's keys for Bob
 ```
 
 Anywhere a person goes, an account address or a handle (with or without
@@ -127,9 +123,10 @@ defineFollowButton(graph, { wallet: () => wallet });  // without it, Selfhold fo
 ```
 
 It reads "Follow @ada" / "Following @ada", or just "Follow" for someone who
-shows no handle. It follows as the connected account, and hides on that
-account's own page. A press that has to connect Selfhold's window first
-connects, shows where the account stands, and asks for one more press.
+shows no handle. It follows the person's account as the connected account,
+and hides on that account's own page and for a handle no account shows. A
+press that has to connect Selfhold's window first connects, shows where the
+account stands, and asks for one more press.
 
 A follow takes about a block (a minute on the trial) to save. The button
 turns at once and its note says "Saving… about a minute." until a block
@@ -216,11 +213,11 @@ coins, and tests check they still hold none. Pop-ups are blocked as for
 anyone, and some tests hold every read the page makes for 1.5 s, so a window
 not opened in the click fails. They cover search by handle and by account,
 both lists with people shown by handle or account tail, counts, the filter,
-navigation and links, empty lists, hostile input, a handle no account shows,
-a handle given to another key (its followers move, the old account keeps its
-own), unfollows, connecting from Follow and following on the next press,
-following with no handle, following an account with no handle, unfollowing
-someone followed both ways, you on the front page and claiming a handle with
+navigation and links, empty lists, hostile input, a handle no account shows
+(no one to follow), a handle given to another key (the old account keeps its
+followers), unfollows, connecting from Follow and following on the next
+press, following with no handle, following an account with no handle, a
+follow by handle staying with the account, you on the front page and claiming a handle with
 its picker, declining in Selfhold, your own page, a long list, a follow
 pending in the mempool, a changed account, `<follows-who>` in another app's
 page, a slow page overtaken by a newer one, dead nodes, phone width and dark
@@ -229,8 +226,8 @@ mode.
 The e2e test launches the chain from `chain/spec.json` and a Moniker chain on
 a private node. Alice and Bob show @ada and @bob; Carol shows none. Alice and
 Carol follow @bob, Bob follows Carol's account, and the test reads both ends
-of the graph. Writing someone else's keys, a target that is neither an
-account nor a `@handle`, half of a follow, or twins with different values is
-refused. Then Alice gives @ada to Dan: @ada's followers follow Dan, and
-Alice's account keeps its own followers and follows. Last, unfollowing
-someone followed both ways deletes both.
+of the graph; following `@bob` writes Bob's account. Writing someone else's
+keys, following anything but an account (a `@handle` included), half of a
+follow, or twins with different values is refused. Then Alice gives @ada to
+Dan: Alice's account keeps its followers and follows, and following @ada
+now follows Dan. Last, Bob unfollows Carol.

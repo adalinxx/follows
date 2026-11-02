@@ -2,13 +2,13 @@
 // launched from chain/spec.json with the built policy, and a Moniker chain
 // under Moniker's own policy (e2e/ui/moniker/), both with fast blocks and
 // free writes. Alice and Bob claim and show @ada and @bob on Moniker; Carol
-// shows no handle. Alice follows Bob (by @bob), Carol follows Bob through the
-// library, and Bob follows Carol, who has no handle, by her account. Every
-// way of writing someone else's keys, half a follow, or a target that is
-// neither an account nor a @handle is refused. Then Alice gives @ada to
-// Dan's key and Dan shows it: @ada's followers follow Dan now, and what
-// followed Alice's account stays hers. Last, Bob unfollows Carol, and an
-// unfollow of a person followed both ways deletes both.
+// shows no handle. An account follows an account: Alice follows Bob (by
+// @bob, which writes Bob's account), Carol follows @bob through the library,
+// and Bob follows Carol, who has no handle, by her account. Every way of
+// writing someone else's keys, half a follow, or following anything but an
+// account (a @handle included) is refused. Then Alice gives @ada to Dan's
+// key and Dan shows it: Alice's followers and follows stay with her
+// account, and following @ada now follows Dan. Last, Bob unfollows Carol.
 //
 //   policy/build.sh
 //   LATTICE=<lattice-node>/.build/debug/lattice node e2e/follows.mjs
@@ -146,12 +146,12 @@ try {
   }
   await until("the handles show", async () => (await moniker.handleOf(alice.address)) === "ada" && (await moniker.handleOf(bob.address)) === "bob");
 
-  // Following someone who shows a handle follows the handle.
+  // A follow is of an account: @bob writes Bob's.
   let state = await graph.state({ fresh: true });
   const viaMoniker = { pointers: (hs) => Promise.all(hs.map((h) => moniker.pointer(h))), handlesOf: (as) => moniker.handlesOf(as) };
-  const aliceFollowsBob = await records.follow(state, viaMoniker, alice.address, bob.address);
-  assert.deepEqual(aliceFollowsBob.actions.map((x) => x.key), [`follows/${alice.address}/@bob`, `followers/@bob/${alice.address}`]);
-  await admitted("Alice follows @bob", FOLLOWS, alice, aliceFollowsBob);
+  const aliceFollowsBob = await records.follow(state, viaMoniker, alice.address, "@bob");
+  assert.deepEqual(aliceFollowsBob.actions.map((x) => x.key), [`follows/${alice.address}/${bob.address}`, `followers/${bob.address}/${alice.address}`]);
+  await admitted("Alice follows @bob, as Bob's account", FOLLOWS, alice, aliceFollowsBob);
   // No handle needed to follow: Carol shows none.
   await graph.follow("@bob", { wallet: walletOf(carol) });
   console.log("  admitted: Carol, showing no handle, follows @bob through the library");
@@ -166,48 +166,49 @@ try {
   assert.deepEqual(await graph.following("@bob"), [{ account: carol.address }]);
   assert.deepEqual(await graph.followingAccounts(carol.address), [bob.address]);
   assert.ok(await graph.follows(carol.address, "@bob"));
+  assert.ok(await graph.follows(carol.address, bob.address));
   assert.ok(!(await graph.follows(bob.address, "@ada")));
   assert.deepEqual(await graph.counts("bob"), { followers: 2, following: 1 });
   assert.deepEqual(await graph.person(carol.address), { account: carol.address });
-  assert.equal(await graph.follow("bob", { wallet: walletOf(alice) }), undefined, "already following: nothing sent");
+  assert.equal(await graph.follow(bob.address, { wallet: walletOf(alice) }), undefined, "already following: nothing sent");
   await assert.rejects(graph.follow("@ada", { wallet: walletOf(alice) }), /yourself/);
+  await assert.rejects(graph.follow("@nobody", { wallet: walletOf(alice) }), /No account shows @nobody/);
   console.log("followers, following and counts read back through the library");
 
   state = await graph.state({ fresh: true });
   const keys = (a, t, value = "1") => [records.followKey(a, t), records.followerKey(a, t)].map((key) => ({ key, newValue: value }));
+  const raw = (a, t, value = "1") => [`follows/${a}/${t}`, `followers/${t}/${a}`].map((key) => ({ key, newValue: value }));
   await refused("Bob writes Alice's keys following Carol", bob, { actions: keys(alice.address, carol.address) });
-  await refused("Bob deletes Alice's keys following @bob", bob, { actions: [records.followKey(alice.address, "@bob"), records.followerKey(alice.address, "@bob")].map((key) => ({ key, oldValue: "1" })) });
-  await refused("Bob follows a target that is neither an account nor a @handle", bob, { actions: [`follows/${bob.address}/Ada`, `followers/Ada/${bob.address}`].map((key) => ({ key, newValue: "1" })) });
-  await refused("Bob follows a bare handle without its @", bob, { actions: [`follows/${bob.address}/ada`, `followers/ada/${bob.address}`].map((key) => ({ key, newValue: "1" })) });
-  await refused("Bob writes his follow of @ada without its twin", bob, { actions: [keys(bob.address, "@ada")[0]] });
-  await refused("Bob lists himself as @ada's follower without following", bob, { actions: [keys(bob.address, "@ada")[1]] });
-  await refused("Bob writes the twins with different values", bob, { actions: [keys(bob.address, "@ada")[0], keys(bob.address, "@ada", "2")[1]] });
+  await refused("Bob deletes Alice's keys following Bob", bob, { actions: [records.followKey(alice.address, bob.address), records.followerKey(alice.address, bob.address)].map((key) => ({ key, oldValue: "1" })) });
+  await refused("Bob follows a @handle", bob, { actions: raw(bob.address, "@ada") });
+  await refused("Bob follows a bare handle", bob, { actions: raw(bob.address, "ada") });
+  await refused("Bob follows a target that is no account", bob, { actions: raw(bob.address, "Ada") });
+  await refused("Bob writes his follow of Alice without its twin", bob, { actions: [keys(bob.address, alice.address)[0]] });
+  await refused("Bob lists himself as Alice's follower without following", bob, { actions: [keys(bob.address, alice.address)[1]] });
+  await refused("Bob writes the twins with different values", bob, { actions: [keys(bob.address, alice.address)[0], keys(bob.address, alice.address, "2")[1]] });
   await refused("Bob writes the old handle-follows-handle shape", bob, { actions: [`follows/bob/ada/${bob.address}`, `followers/ada/bob/${bob.address}`].map((key) => ({ key, newValue: "1" })) });
   await refused("Bob writes a profile here", bob, { actions: [{ key: "profile/abcdefghij234567", newValue: bob.address }] });
 
-  // Dan follows Alice's account by hand, so her account has a follower of its own.
-  await admitted("Dan follows Alice's account", FOLLOWS, dan, { actions: keys(dan.address, alice.address) });
+  // Dan follows Alice, so her account has a follower of its own.
+  await graph.follow("@ada", { wallet: walletOf(dan) });
   await until("Dan's follow is mined", async () => (await graph.followers(alice.address)).includes(dan.address));
   // Alice gives @ada to Dan's key: offered, taken, pointed and shown.
   await admitted("Alice offers @ada to Dan", MONIKER, alice, await names.offerName(await moniker.state({ fresh: true }), alice.address, "ada", dan.address));
   await until("@ada is offered", async () => (await moniker.name("ada"))?.offer === dan.address);
   await admitted("Dan takes @ada and shows it", MONIKER, dan, await names.buy(await moniker.state({ fresh: true }), dan.address, "ada", { show: true }));
   await until("@ada shows for Dan", async () => (await moniker.handleOf(dan.address)) === "ada");
-  // Carol follows @ada now, so @ada has a follower; then the handle's and the account's split.
-  await graph.follow("@ada", { wallet: walletOf(carol) });
-  await until("Carol's follow of @ada is mined", async () => (await graph.followers("@ada")).includes(carol.address));
   assert.equal((await graph.person("@ada")).account, dan.address);
-  assert.deepEqual(await graph.followers("@ada"), [carol.address], "@ada's followers follow Dan now");
-  assert.deepEqual(await graph.followers(alice.address), [dan.address], "Alice's account keeps its own followers");
+  assert.deepEqual(await graph.followers(alice.address), [dan.address], "Alice's account keeps its followers");
+  assert.deepEqual(await graph.followers("@ada"), [], "Dan's account: nobody follows it yet");
+  assert.deepEqual(await graph.following(alice.address), [{ account: bob.address, handle: "bob" }], "and its follows");
   assert.deepEqual(await graph.person(alice.address), { account: alice.address });
-  // Alice's own follows are her account's: giving a handle away keeps them.
-  assert.deepEqual(await graph.following(alice.address), [{ account: bob.address, handle: "bob" }]);
-  console.log("@ada given to Dan: its followers follow Dan; Alice's account kept its followers and its follows");
+  // Following @ada now follows Dan's account.
+  await graph.follow("@ada", { wallet: walletOf(carol) });
+  await until("Carol's follow of @ada is mined", async () => (await graph.followers(dan.address)).includes(carol.address));
+  assert.deepEqual(await graph.followers("@ada"), [carol.address]);
+  console.log("@ada given to Dan: Alice's account kept its followers and follows; @ada names Dan now");
 
-  // Unfollowing deletes every way the account follows someone.
-  await admitted("Carol also follows Bob's account", FOLLOWS, carol, { actions: keys(carol.address, bob.address) });
-  await until("both of Carol's follows of Bob are mined", async () => (await (await graph.state({ fresh: true })).get(records.followKey(carol.address, bob.address))) !== undefined);
-  assert.deepEqual(sorted(await graph.followers("@bob")), sorted([alice.address, carol.address]), "each account once");
+  // Unfollowing deletes the pair.
   await graph.unfollow(bob.address, { wallet: walletOf(carol) });
   await graph.unfollow(carol.address, { wallet: walletOf(bob) });
   await until("the unfollows are mined", async () => (await graph.followers(bob.address)).length === 1 && (await graph.followers(carol.address)).length === 0);
@@ -215,7 +216,6 @@ try {
   assert.deepEqual(await graph.following(carol.address), [{ account: dan.address, handle: "ada" }]);
   const left = await graph.state({ fresh: true });
   assert.equal(await left.get(records.followKey(carol.address, bob.address)), undefined);
-  assert.equal(await left.get(records.followKey(carol.address, "@bob")), undefined);
   assert.equal(await graph.unfollow(bob.address, { wallet: walletOf(carol) }), undefined, "nothing left to unfollow");
   console.log("PASS");
 } finally {

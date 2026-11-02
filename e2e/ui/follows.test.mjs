@@ -1,8 +1,7 @@
 // Acceptance tests for the Follows site: the real page (app/) in Chromium
 // against a private Lattice stack (stack.mjs) with a Follows chain and a
-// Moniker chain, seeded below. An account follows an account, or a handle;
-// a person shows by the handle they show on Moniker, or their account's
-// tail. Each test is one thing a person does, checked by what the page then
+// Moniker chain, seeded below. An account follows an account; a person
+// shows by the handle they show on Moniker, or their account's tail. Each test is one thing a person does, checked by what the page then
 // shows.
 // Following goes through Selfhold's window, where each person makes an
 // account with a passkey (Chromium's virtual authenticator) and approves each
@@ -48,7 +47,7 @@ before(async () => {
   // Each claims and shows its handle; Anon and Quiet show none.
   await Promise.all(["ada", "bob", "cara", "eve", "solo", "popular", "tara", "drift", "both"].map((name) => c.claim(p[name], name)));
   await c.claim(p.swapA, "swap");
-  // Following someone who shows a handle follows the handle; Quiet, who shows none, by account.
+  // A follow is of an account: @ada is Ada's. Quiet, who shows no handle, is followed by account.
   await Promise.all([
     c.follow(p.bob, "@ada", p.quiet.address),
     c.follow(p.cara, "@ada", "@swap"),
@@ -56,7 +55,7 @@ before(async () => {
     c.follow(p.ada, "@bob", "@eve", "@cara", "@drift"),
     c.follow(p.anon, "@ada"),
   ]);
-  // Bob also follows Swap's account by account, which stays with it when @swap moves.
+  // Bob follows Swap A's account by its address; Cara by @swap, which is the same account.
   await c.followAccount(p.bob, p.swapA.address);
   // Many followers: each fan claims a handle, then follows @popular; sent together, then waited for.
   const fanHandle = (i) => `fan_${String(i).padStart(3, "0")}`;
@@ -65,7 +64,7 @@ before(async () => {
   for (const fan of p.fans) await c.submit(FOLLOWS, fan, await c.followActions(fan, "@popular"));
   await until("every fan's follow lands", async () => {
     let n = 0;
-    for await (const _ of (await c.state.follows()).list("followers/@popular/")) n++;
+    for await (const _ of (await c.state.follows()).list(`followers/${p.popular.address}/`)) n++;
     return n === FANS;
   });
   // Pop-ups blocked as for anyone (Playwright turns the blocker off by
@@ -161,7 +160,8 @@ async function close(page) {
   await page.context().close();
 }
 /** Whether `who` (an account, or its address) holds a follow key for `t` on the chain: an address, or `@h`. */
-const keyed = (who, t) => c.keyed(typeof who === "string" ? { address: who } : who, t);
+/** Whether `who` follows `t`: an account, or a seeded @handle, which stands for the account it was claimed by. */
+const keyed = (who, t) => c.keyed(typeof who === "string" ? { address: who } : who, t.startsWith("@") ? p[t.slice(1)].address : t);
 
 // ---------------------------------------------------------------- finding people
 
@@ -273,22 +273,22 @@ test("the followers count opens the list of people, each linking to their page",
   await close(page);
 });
 
-test("the following count lists whom they follow, a handle no one shows included", async () => {
+test("the following count lists whom they follow; one who stops showing a handle is listed by account", async () => {
   await c.stopShowing(p.drift);
   const page = await open("#/@ada/following");
   await expect(title(page)).toHaveText("@ada follows");
-  await listed(page, ["@bob", "@cara", "@drift", "@eve"]);
+  await listed(page, ["@bob", "@cara", "@eve", tail(p.drift)]);
   await expect(page.getByRole("link", { name: "@cara" })).toHaveAttribute("href", "#/%40cara");
-  // @drift's page: no one shows it, and it can still be followed.
-  await page.getByRole("link", { name: "@drift" }).click();
-  await expect(title(page)).toHaveText("@drift");
-  await expect(page.locator(".person")).toContainText("No account shows @drift now. Follow it, and you follow whoever shows it next.");
-  await expect(counts(page)).toHaveText(["1 follower", "0 following"]);
-  await expect(followButton(page)).toHaveText("Follow @drift");
-  // Drift's account, showing no handle, keeps no followers of @drift.
-  await page.goto(url(`#/${p.drift.address}`));
+  // Drift's account, showing no handle, keeps Ada's follow.
+  await page.getByRole("link", { name: tail(p.drift) }).click();
   await expect(title(page)).toHaveText(`Account ${tail(p.drift)}`);
+  await expect(counts(page)).toHaveText(["1 follower", "0 following"]);
+  // @drift's page: no account shows it, so there is no one to follow.
+  await page.goto(url("#/@drift"));
+  await expect(title(page)).toHaveText("@drift");
+  await expect(page.locator(".person")).toContainText("No account shows @drift now, so there is no one to follow.");
   await expect(counts(page)).toHaveText(["0 followers", "0 following"]);
+  await expect(page.locator("follows-button")).toBeHidden();
   await close(page);
 });
 
@@ -332,21 +332,20 @@ test("counts read naturally", async () => {
 
 // ---------------------------------------------------------------- handles that move
 
-test("a handle given to another key: its followers follow that key, and the old account keeps its own", async () => {
+test("a handle given to another key: the followers stay with the old account, and @handle names the new one", async () => {
   let page = await open("#/@swap/followers");
   await listed(page, ["@bob", "@cara"]);
   await close(page);
   await c.give(p.swapA, "swap", p.swapB);
+  // @swap is Swap B's account now, which nobody follows yet.
   page = await open("#/@swap");
-  await expect(counts(page)).toHaveText(["1 follower", "0 following"]);
-  await counts(page).first().click();
-  await expect(rows(page)).toHaveText(["@cara"]);
-  // Swap A's account, showing no handle now, keeps Bob, who followed it by account.
+  await expect(counts(page)).toHaveText(["0 followers", "0 following"]);
+  // Swap A's account, showing no handle now, keeps both its followers.
   await page.goto(url(`#/${p.swapA.address}`));
   await expect(title(page)).toHaveText(`Account ${tail(p.swapA)}`);
-  await expect(counts(page)).toHaveText(["1 follower", "0 following"]);
+  await expect(counts(page)).toHaveText(["2 followers", "0 following"]);
   await page.goto(url(`#/${p.swapA.address}/followers`));
-  await expect(rows(page)).toHaveText(["@bob"]);
+  await listed(page, ["@bob", "@cara"]);
   // Bob's list shows Swap A's account by its tail now.
   await page.goto(url("#/@bob/following"));
   await listed(page, ["@ada", tail(p.quiet), tail(p.swapA)]);
@@ -509,22 +508,18 @@ test("Following shows Unfollow under a mouse, and pressing it unfollows", async 
   });
 });
 
-test("unfollowing someone followed both ways deletes both, in one write", async () => {
+test("following by handle follows the account: it stays followed when the handle stops showing, and unfollows in one write", async () => {
   await asPerson("#/", async (page) => {
     const me = await connect(page);
-    // By handle while Both shows it…
     await page.goto(url("#/@both"));
     await approveInSelfhold(page, followButton(page));
     await expect(note(page)).toHaveText("Saved.", { timeout: 180_000 });
-    // …and by account while it shows none.
+    assert.ok(await keyed(me, p.both.address));
+    // Both stops showing a handle: still followed, by account.
     await c.stopShowing(p.both);
     await page.goto(url(`#/${p.both.address}`));
     await page.reload();
-    await expect(followButton(page)).toHaveText("Follow");
-    await approveInSelfhold(page, followButton(page));
-    await expect(note(page)).toHaveText("Saved.", { timeout: 180_000 });
-    assert.ok(await keyed(me, "@both"));
-    assert.ok(await keyed(me, p.both.address));
+    await expect(followButton(page)).toHaveText("Following");
     await c.show(p.both, "both");
     await page.goto(url("#/@both"));
     await page.reload();
@@ -532,7 +527,6 @@ test("unfollowing someone followed both ways deletes both, in one write", async 
     const asked = await selfholdRequests(page);
     await approveInSelfhold(page, followButton(page));
     await expect(note(page)).toHaveText("Saved.", { timeout: 180_000 });
-    assert.ok(!(await keyed(me, "@both")));
     assert.ok(!(await keyed(me, p.both.address)));
     assert.equal(await selfholdRequests(page), asked + 1);
   });

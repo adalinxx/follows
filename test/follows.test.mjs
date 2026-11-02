@@ -51,86 +51,60 @@ function chain() {
   return { state, submit, map };
 }
 
-const people = (list) => list.map((p) => p.handle ?? p.account);
-
-test("following a person with a handle follows the handle; without one, the account", async () => {
+test("a follow is of an account: @bob follows the account showing it", async () => {
   const { state, submit, map } = chain();
   const { names, shows } = moniker();
   shows.delete(CAROL); // Carol shows no handle
-  assert.ok(submit(ALICE, await records.follow(state, names, ALICE, BOB)));
+  assert.ok(submit(ALICE, await records.follow(state, names, ALICE, "@bob")));
   assert.ok(submit(ALICE, await records.follow(state, names, ALICE, CAROL)));
-  assert.deepEqual([...map.keys()].sort(), [`followers/${CAROL}/${ALICE}`, `followers/@bob/${ALICE}`, `follows/${ALICE}/${CAROL}`, `follows/${ALICE}/@bob`].sort());
-  // In key order: `@` sorts before any address.
-  assert.deepEqual(await records.following(state, names, ALICE), [{ account: BOB, handle: "bob" }, { account: CAROL }]);
-  assert.deepEqual(await records.followers(state, names, "@bob"), [ALICE]);
-  assert.deepEqual(await records.followers(state, names, BOB), [ALICE]);
+  assert.deepEqual([...map.keys()].sort(), [`followers/${BOB}/${ALICE}`, `followers/${CAROL}/${ALICE}`, `follows/${ALICE}/${BOB}`, `follows/${ALICE}/${CAROL}`].sort());
+  const expected = [{ account: BOB, handle: "bob" }, { account: CAROL }].sort((x, y) => (x.account < y.account ? -1 : 1)); // key order
+  assert.deepEqual(await records.following(state, names, ALICE), expected);
+  for (const who of ["@bob", "bob", BOB]) assert.deepEqual(await records.followers(state, names, who), [ALICE], who);
   assert.deepEqual(await records.followers(state, names, CAROL), [ALICE]);
   assert.ok(await records.follows(state, names, ALICE, "bob"));
+  assert.ok(await records.follows(state, names, ALICE, BOB));
   assert.ok(!(await records.follows(state, names, BOB, ALICE)));
+  // By handle or by account, the same follow: nothing more to write.
+  assert.deepEqual(await records.follow(state, names, ALICE, BOB), { actions: [] });
   // No handle needed to follow: Carol shows none, and follows Bob.
   assert.ok(submit(CAROL, await records.follow(state, names, CAROL, "@bob")));
   assert.deepEqual(await records.followers(state, names, BOB), [ALICE, CAROL].sort()); // key order
 });
 
-test("a person's followers are their account's and their handle's, each account once", async () => {
-  const { state, submit } = chain();
-  const { names, shows } = moniker();
-  shows.delete(BOB);
-  assert.ok(submit(ALICE, await records.follow(state, names, ALICE, BOB))); // by account: Bob shows no handle yet
-  shows.set(BOB, "bob");
-  assert.ok(submit(CAROL, await records.follow(state, names, CAROL, BOB))); // by handle now
-  assert.deepEqual(await records.follow(state, names, ALICE, "@bob"), { actions: [] }); // already, by account
-  assert.deepEqual(await records.followers(state, names, BOB), [ALICE, CAROL]);
-  assert.deepEqual(await records.followers(state, names, "@bob"), [ALICE, CAROL]);
-  // Alice follows both ways by hand: still one follower, one entry.
-  assert.ok(submit(ALICE, { actions: [records.followKey(ALICE, "@bob"), records.followerKey(ALICE, "@bob")].map((key) => ({ key, newValue: "1" })) }));
-  assert.deepEqual(await records.followers(state, names, BOB), [ALICE, CAROL]);
-  assert.deepEqual(await records.following(state, names, ALICE), [{ account: BOB, handle: "bob" }]);
-  // Unfollow deletes both.
-  assert.equal((await records.unfollow(state, names, ALICE, BOB)).actions.length, 4);
-});
-
-test("a handle's followers go where it goes; an account's stay", async () => {
+test("a follow stays with the account when its handle changes hands", async () => {
   const { state, submit } = chain();
   const { names, points, shows } = moniker();
-  assert.ok(submit(CAROL, await records.follow(state, names, CAROL, "@ada")));
-  shows.delete(ALICE);
-  assert.ok(submit(BOB, await records.follow(state, names, BOB, ALICE))); // by account: Alice shows no handle yet
-  shows.set(ALICE, "ada");
+  assert.ok(submit(CAROL, await records.follow(state, names, CAROL, "@ada"))); // Alice's account
   // Alice gives @ada to Bob's key, and it shows there now.
   points.set("ada", BOB);
   shows.set(BOB, "ada");
-  assert.deepEqual(await records.followers(state, names, "@ada"), [CAROL]);
-  assert.deepEqual(await records.followers(state, names, BOB), [CAROL]);
-  assert.deepEqual(await records.followers(state, names, ALICE), [BOB]);
-  assert.deepEqual(people(await records.following(state, names, CAROL)), ["ada"]);
-  assert.equal((await records.following(state, names, CAROL))[0].account, BOB);
+  shows.delete(ALICE);
+  assert.deepEqual(await records.followers(state, names, ALICE), [CAROL]);
+  assert.deepEqual(await records.followers(state, names, "@ada"), []); // Bob's account: nobody follows it
+  assert.deepEqual(await records.following(state, names, CAROL), [{ account: ALICE }]);
+  assert.ok(!(await records.follows(state, names, CAROL, "@ada")));
 });
 
-test("a handle no account shows is still followed, and stands for no one", async () => {
+test("a handle no account shows is no one to follow", async () => {
   const { state, submit } = chain();
   const { names, points, shows } = moniker();
   assert.ok(submit(ALICE, await records.follow(state, names, ALICE, "@bob")));
-  shows.set(BOB, "other"); // Bob shows another handle
-  assert.deepEqual(await records.following(state, names, ALICE), [{ handle: "bob" }]);
-  assert.deepEqual(await records.followers(state, names, BOB), []);
-  assert.deepEqual(await records.followers(state, names, "@bob"), [ALICE]);
-  points.delete("bob"); // released
-  assert.deepEqual(await records.following(state, names, ALICE), [{ handle: "bob" }]);
-  // A handle never claimed can be followed too, as `{ handle }`.
-  assert.ok(submit(ALICE, await records.follow(state, names, ALICE, "@nobody")));
-  assert.ok(await records.follows(state, names, ALICE, "nobody"));
-  // Shown again, the follow counts for whoever shows it.
-  points.set("bob", BOB);
-  shows.set(BOB, "bob");
+  shows.set(BOB, "other"); // Bob shows another handle: still followed, as an account
+  assert.deepEqual(await records.following(state, names, ALICE), [{ account: BOB }]);
   assert.deepEqual(await records.followers(state, names, BOB), [ALICE]);
+  assert.deepEqual(await records.followers(state, names, "@bob"), []);
+  assert.ok(!(await records.follows(state, names, ALICE, "@bob")));
+  await assert.rejects(records.follow(state, names, ALICE, "@bob"), /No account shows @bob/);
+  points.delete("bob"); // released
+  await assert.rejects(records.follow(state, names, ALICE, "@nobody"), /No account shows @nobody/);
+  assert.deepEqual(await records.unfollow(state, names, ALICE, "@nobody"), { actions: [] });
 });
 
 test("unfollow deletes the account's keys; repeats write nothing", async () => {
   const { state, submit, map } = chain();
   const { names } = moniker();
   assert.ok(submit(ALICE, await records.follow(state, names, ALICE, "@bob")));
-  assert.deepEqual(await records.follow(state, names, ALICE, BOB), { actions: [] });
   assert.ok(submit(ALICE, await records.unfollow(state, names, ALICE, BOB)));
   assert.deepEqual(await records.following(state, names, ALICE), []);
   assert.equal(map.size, 0);
@@ -148,12 +122,14 @@ test("an account's keys are its own; nobody follows themselves", async () => {
   await assert.rejects(records.follow(state, names, ALICE, ALICE), /yourself/);
 });
 
-test("only an account or a @handle is followed", async () => {
+test("only an account, or a @handle naming one, is followed; keys hold accounts only", async () => {
   const { names } = moniker();
   for (const neither of ["Bob", "@Bob", "bo b", "bob/x", "@@bob", ""]) {
     await assert.rejects(records.follow(chain().state, names, ALICE, neither), /not an account or a handle/, neither);
   }
   await assert.rejects(records.follow(chain().state, names, "ada", BOB), /not an account/);
+  assert.throws(() => records.followKey(ALICE, "@bob"), /not an account/);
+  assert.throws(() => records.followerKey(ALICE, "bob"), /not an account/);
   assert.equal(records.target("bob"), "@bob");
   assert.equal(records.target("@bob"), "@bob");
   assert.equal(records.target(BOB), BOB);
@@ -162,16 +138,16 @@ test("only an account or a @handle is followed", async () => {
 
 test("a follow or unfollow waiting for a block is found in transaction bodies", () => {
   const keys = (t) => [records.followKey(ALICE, t), records.followerKey(ALICE, t)];
-  const follow = { signers: [ALICE], actions: keys("@bob").map((key) => ({ key, newValue: "1" })) };
+  const follow = { signers: [ALICE], actions: keys(BOB).map((key) => ({ key, newValue: "1" })) };
   const unfollow = { signers: [ALICE], actions: keys(CAROL).map((key) => ({ key, oldValue: "1" })) };
-  const others = { signers: [BOB], actions: [{ key: records.followKey(BOB, "@ada"), newValue: "1" }] };
-  assert.deepEqual(records.pendingIn([follow, unfollow, others, undefined, {}], ALICE), { "@bob": true, [CAROL]: false });
+  const others = { signers: [BOB], actions: [{ key: records.followKey(BOB, ALICE), newValue: "1" }] };
+  assert.deepEqual(records.pendingIn([follow, unfollow, others, undefined, {}], ALICE), { [BOB]: true, [CAROL]: false });
   assert.deepEqual(records.pendingIn([others], ALICE), {});
-  // Malformed bodies are skipped, not fatal.
+  // Malformed bodies are skipped, not fatal; a handle is no followed account.
   const odd = [
     { signers: `x${ALICE}x`, actions: follow.actions },
     { signers: [ALICE], actions: "nope" },
-    { signers: [ALICE, BOB], actions: [null, { key: 7 }, { key: records.followKey(BOB, "@cara"), newValue: "1" }, { key: `${records.followKey(ALICE, "@cara")}/x`, newValue: "1" }, { key: `follows/${ALICE}/Bob`, newValue: "1" }, { key: records.followKey(ALICE, "@cara"), newValue: "1" }] },
+    { signers: [ALICE, BOB], actions: [null, { key: 7 }, { key: records.followKey(BOB, CAROL), newValue: "1" }, { key: `${records.followKey(ALICE, CAROL)}/x`, newValue: "1" }, { key: `follows/${ALICE}/Bob`, newValue: "1" }, { key: `follows/${ALICE}/@cara`, newValue: "1" }, { key: records.followKey(ALICE, CAROL), newValue: "1" }] },
   ];
-  assert.deepEqual(records.pendingIn(odd, ALICE), { "@cara": true });
+  assert.deepEqual(records.pendingIn(odd, ALICE), { [CAROL]: true });
 });

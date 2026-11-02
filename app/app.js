@@ -8,8 +8,8 @@
 //         #/<who>/followers        the accounts that follow them
 //         #/<who>/following        whom they follow
 //
-// An account follows an account, or a handle. A person shows by the handle
-// they show on Moniker, or by their account's tail when they show none.
+// An account follows an account. A person shows by the handle they show
+// on Moniker, or by their account's tail when they show none.
 //
 // A link may carry `?node=` (nodes, comma-separated), `?chain=` (the Follows
 // chain) and `?moniker=` (the Moniker chain) to read somewhere else;
@@ -193,7 +193,7 @@ async function personPage(who, p) {
       ${avatar(p, 72)}
       <div>
         <h1>${esc(title(p))}</h1>
-        ${nobody ? `<p class="muted small">No account shows @${esc(p.handle)} now. Follow it, and you follow whoever shows it next.</p>` : ""}
+        ${nobody ? `<p class="muted small">No account shows @${esc(p.handle)} now, so there is no one to follow.</p>` : ""}
         ${p.handle !== undefined ? `<p class="links"><a href="${esc(moniker.pageURL(`@${p.handle}`))}" target="_blank" rel="noopener">Moniker page</a></p>` : ""}
       </div>
     </section>

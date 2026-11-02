@@ -84,7 +84,7 @@ test("Selfhold is handed the write at once, as a promise, with no fee proposed",
   const request = await asked.request;
   assert.equal(request.fee, undefined, "the wallet pays what the hosts ask");
   assert.deepEqual(request.chainPath, DEFAULTS.chain);
-  assert.deepEqual(request.actions.map((a) => a.key), [`follows/${address}/@ada`, `followers/@ada/${address}`]);
+  assert.deepEqual(request.actions.map((a) => a.key), [`follows/${address}/${other}`, `followers/${other}/${address}`] /* the account showing @ada */);
 });
 
 test("a wallet that takes only a built request gets one; nothing to write sends nothing", async () => {

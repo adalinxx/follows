@@ -1,17 +1,16 @@
 // Follows for any app: one follow graph every Lattice app shares, so a
 // person's audience comes with them instead of starting at zero in each app.
-// An account follows an account, or a handle: a Moniker name, standing for
-// the account that shows it now.
+// An account follows an account. People may be named by a Moniker handle,
+// which stands for the account that shows it.
 //
 //   const graph = createFollows({ sdk, moniker });      // sdk: the Lattice SDK module; moniker: createMoniker(…)
 //   const people = await graph.following(address);     // [{ account, handle }, …]
-//   const fans = await graph.followers("@bob");         // the accounts following @bob's account or handle
+//   const fans = await graph.followers("@bob");         // the accounts following the account showing @bob
 //   const feed = await graph.followingAccounts(address);  // the accounts to build a feed from
 //   await graph.follow("@bob", { wallet });              // wallet: selfhold() from @selfhold/web, or window.lattice
 //
-// Following someone who shows a handle follows the handle; following
-// someone without one follows their account. A person's followers are those
-// of their account and of the handle they show, each account once.
+// Following @bob follows the account showing @bob now, and the follow stays
+// with that account if the handle changes hands.
 //
 // Reads go to the first of `nodes` that answers and are checked by CID, so
 // they do not depend on trusting that node. Writes go to the wallet, which
@@ -24,7 +23,7 @@ import { writeRequest } from "./records/wallet.mjs";
 
 /** Where Follows lives now: its testnet trial chain and the shared hosts. */
 export const DEFAULTS = {
-  chain: ["Nexus", "testnet", "follows-17e400"],
+  chain: ["Nexus", "testnet", "follows-449390"],
   nodes: ["https://lattice-testnet-apps-iad.fly.dev", "https://lattice-testnet-apps-ams.fly.dev"],
   // How long a read state is reused before asking for the tip again.
   freshFor: 10_000,
@@ -93,9 +92,9 @@ export function createFollows(options) {
     state,
     moniker,
 
-    /** Who `who` (an account, or a handle with or without @) is: `{ account, handle }`, or `{ handle }` when no account shows it. */
+    /** Who `who` (an account, or a handle with or without @) is: `{ account, handle }`, or `{ handle }` when no account shows it, which nobody can follow. */
     person: async (who) => records.person(names, who),
-    /** Whom `who` follows, one entry a person: `{ account, handle }`, or `{ handle }` for a handle no account shows now. */
+    /** Whom `who` follows: `{ account, handle }`, with the handle each account shows now, if any. */
     following: async (who) => {
       const { account } = await records.person(names, who);
       return account === undefined ? [] : records.following(await state(), names, account);
@@ -104,9 +103,9 @@ export function createFollows(options) {
     followingAccounts: async (who) => {
       const { account } = await records.person(names, who);
       if (account === undefined) return [];
-      return (await records.following(await state(), names, account)).flatMap((p) => (p.account === undefined ? [] : [p.account]));
+      return (await records.following(await state(), names, account)).map((p) => p.account);
     },
-    /** The accounts that follow `who`, by its account or the handle it shows, each once. */
+    /** The accounts that follow `who`'s account. */
     followers: async (who) => records.followers(await state(), names, who),
     /** How many accounts follow `who`, and how many people it follows: `{ followers, following }`. */
     counts: async (who) => {
@@ -115,12 +114,11 @@ export function createFollows(options) {
       const [followers, following] = await Promise.all([records.followers(s, names, who), account === undefined ? [] : records.following(s, names, account)]);
       return { followers: followers.length, following: following.length };
     },
-    /** Whether `account` follows `who`, by account or handle. */
+    /** Whether `account` follows `who`'s account. */
     follows: async (account, who) => records.follows(await state(), names, account, who),
     /**
      * What `account` is saving now: follows (`true`) and unfollows (`false`)
-     * waiting in the first answering node's mempool, by followed target:
-     * an address or `@<h>`.
+     * waiting in the first answering node's mempool, by followed account.
      */
     pending: async (account) => {
       for (const node of nodes) {
@@ -152,8 +150,8 @@ export function createFollows(options) {
     },
 
     /**
-     * The connected account follows `who`: the handle they show, else their
-     * account. Resolves to undefined when it follows them already. Call it
+     * The connected account follows `who`'s account: for a handle, the
+     * account showing it now. Resolves to undefined when it follows them already. Call it
      * from a click, once the account is connected: Selfhold's window opens
      * only then.
      */
@@ -164,7 +162,7 @@ export function createFollows(options) {
         if ((await records.person(names, who)).account === account) throw new Error("You can't follow yourself.");
         return records.follow(await state({ fresh: true }), names, account, who);
       }),
-    /** The connected account stops following `who`, by account and by handle. Resolves to undefined when it didn't. As `follow`, from a click. */
+    /** The connected account stops following `who`'s account. Resolves to undefined when it didn't. As `follow`, from a click. */
     unfollow: async (who, { wallet }) =>
       send(wallet, async (account) => {
         await moniker.state({ fresh: true });

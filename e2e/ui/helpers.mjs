@@ -95,7 +95,7 @@ export function client(node) {
       await write(MONIKER, from, (await names.offerName(await state.moniker(), from.address, handle, to.address)).actions);
       await write(MONIKER, to, (await names.buy(await state.moniker(), to.address, handle, { show: true })).actions);
     },
-    /** `who` follows each of `targets` (accounts or @handles) as the library would, in one transaction. */
+    /** `who` follows each of `targets` (accounts, or @handles for the accounts showing them) as the library would, in one transaction. */
     follow: async (who, ...targets) => {
       const actions = [];
       for (const t of targets) actions.push(...(await followActions(who, t)));
@@ -106,7 +106,7 @@ export function client(node) {
     followAccount: async (who, account) =>
       write(FOLLOWS, who, [follows.followKey(who.address, account), follows.followerKey(who.address, account)].map((key) => ({ key, newValue: "1" }))),
     unfollow: async (who, t) => write(FOLLOWS, who, (await follows.unfollow(await state.follows(), await resolver(), who.address, t)).actions),
-    /** Whether `who` holds a follow key for `t`, exactly as given (an address or `@h`). */
+    /** Whether `who` holds a follow key for account `t`. */
     keyed: async (who, t) => (await (await state.follows()).get(follows.followKey(who.address, t))) === "1",
   };
 }
