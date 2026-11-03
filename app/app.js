@@ -76,6 +76,7 @@ let pages = 0; // pages shown so far
 async function render() {
   const { who, list } = route();
   search.value = "";
+  document.body.classList.toggle("on-home", who === "");
   if (who === "") return home();
   const parsed = parseWho(who);
   if (!parsed) return message(`“${who}” isn't a @handle or an account.`);
@@ -101,19 +102,81 @@ async function render() {
   }
 }
 
+// The front page's code sample: the library at the commit this page is built from.
+const EMBED = `<follows-button target="@ada"></follows-button>
+<script type="module">
+  import { createFollows, defineFollowButton } from "https://cdn.jsdelivr.net/gh/adalinxx/follows@a910bff/src/browser.mjs";
+  import { createMoniker } from "https://cdn.jsdelivr.net/gh/adalinxx/moniker-sdk@2c3491b/src/browser.mjs";
+  import { selfhold } from "./selfhold.mjs"; // @selfhold/web
+
+  const graph = createFollows({ moniker: createMoniker() });
+  const wallet = selfhold({ use: "window", hosts: () => graph.nodes, sponsor: () => SPONSOR });
+  defineFollowButton(graph, { wallet: () => wallet });
+</script>`;
+
 async function home() {
   shown = null;
   main.innerHTML = `
-    <section class="home">
-      <h1>One follow list for every app.</h1>
-      <p class="muted">Follow someone once and every app that reads Follows knows it. Search a @handle to see who follows them.</p>
+    <section class="hero">
+      <div>
+        <h1>One follow list for every app.</h1>
+        <p class="lede">Follow someone once and every app that reads Follows knows it. Search a @handle to see who follows them.</p>
+        <section class="mine" hidden></section>
+      </div>
+      <figure class="graph" aria-label="You follow @ada once. Stoa, Murmur and your own app all read that follow.">
+        <div class="pair">
+          <span class="node"><i class="disc"></i>You</span>
+          <span class="edge">follow</span>
+          <span class="node"><i class="ring"></i>@ada</span>
+        </div>
+        <p class="chain">Written once, under your account, on the Follows chain</p>
+        <ul class="readers">
+          <li><b>Stoa</b><span>uses it in each community's standing</span></li>
+          <li><b>Murmur</b><span>puts @ada's posts in your timeline</span></li>
+          <li><b>Your app</b><code>graph.follows(you, "@ada") → true</code></li>
+        </ul>
+      </figure>
     </section>
-    <section class="mine" hidden></section>
     ${recent().length ? `
       <section class="recent">
         <h2>Recently viewed</h2>
         <ul class="people">${recent().map((p) => row(p)).join("")}</ul>
-      </section>` : ""}`;
+      </section>` : ""}
+    <section class="band">
+      <h2>How it works</h2>
+      <ol class="steps">
+        <li><h3>Connect Selfhold</h3><p>A passkey makes your account in a small window. There's nothing to install.</p></li>
+        <li><h3>Follow someone</h3><p>Search their @handle or account and press Follow. You don't need a handle of your own.</p></li>
+        <li><h3>Every app knows</h3><p>Any app that reads Follows sees the follow, from the same chain, within about a minute.</p></li>
+      </ol>
+    </section>
+    <section class="band">
+      <h2>Your follows go where you go</h2>
+      <div class="facts">
+        <div><h3>Yours, not an app's</h3><p>Follows are signed by your account and kept on a public chain. No app can lose them or keep them to itself.</p></div>
+        <div><h3>You follow the account</h3><p>A handle is the name an account shows today. If @ada shows a new one, you still follow the same account.</p></div>
+        <div><h3>No coins</h3><p>Each follow costs a small fee, and this device's work pays it through a fee sponsor.</p></div>
+        <div><h3>Checked, not trusted</h3><p>Apps read follows from public nodes and check them against the chain. There is no Follows server in between.</p></div>
+      </div>
+    </section>
+    <section class="band">
+      <h2>Apps that read Follows</h2>
+      <ul class="apps">
+        <li><a href="https://stoasocial.github.io/stoa/app/" target="_blank" rel="noopener"><strong>Stoa</strong><span>A forum no one can censor: communities, posts, threaded comments and votes.</span><em>Open Stoa</em></a></li>
+        <li><a href="https://adalinxx.github.io/murmur/app/" target="_blank" rel="noopener"><strong>Murmur</strong><span>Short posts no one can take down or sell. Your timeline is the people you follow.</span><em>Open Murmur</em></a></li>
+      </ul>
+    </section>
+    <section class="band">
+      <h2>Add Follows to your app</h2>
+      <p>A Follow button for any page, and a library to read who follows whom. Both work without a server of yours.</p>
+      <pre class="code"><code>${esc(EMBED)}</code></pre>
+      <p class="small"><a href="https://github.com/adalinxx/follows#use-follows-in-your-app" target="_blank" rel="noopener">Read the guide on GitHub</a></p>
+    </section>
+    <footer class="foot">
+      <p>Follows runs on the Lattice testnet. Follows made now may be reset when the trial chain is replaced.</p>
+      <a href="https://github.com/adalinxx/follows" target="_blank" rel="noopener">Source</a>
+      <a href="https://github.com/adalinxx/follows-brand" target="_blank" rel="noopener">Brand</a>
+    </footer>`;
   search.focus();
   await yours();
 }
@@ -150,7 +213,7 @@ async function yours() {
     section.hidden = false;
     section.innerHTML = `<h2>You</h2>
       <ul class="people"><li class="handle-row">
-        <a href="${esc(link(p))}">${avatar(p, 40)}<span class="who"><strong>${esc(labelOf(p))}</strong></span></a>
+        <a href="${esc(link(p))}">${avatar(p, 40)}<span class="who"><strong>${name(p)}</strong></span></a>
         <span class="row-counts small">
           <a href="${esc(link(p))}/followers">${esc(count(n.followers, "follower"))}</a>
           <a href="${esc(link(p))}/following">${esc(count(n.following, "following", "following"))}</a>
@@ -181,6 +244,10 @@ const countLinks = (p, n) => `
 
 /** What a page's heading calls a person. */
 const title = (p) => (p.handle !== undefined ? `@${p.handle}` : `Account ${labelOf(p)}`);
+/** The same as markup: an account's tail is set in the mono face, as people compare it by eye. */
+const heading = (p) => (p.handle !== undefined ? esc(`@${p.handle}`) : `Account <span class="tail">${esc(labelOf(p))}</span>`);
+/** A row's name: the handle, or the account's tail in the mono face. */
+const name = (p) => (p.handle !== undefined ? esc(labelOf(p)) : `<span class="tail">${esc(labelOf(p))}</span>`);
 
 async function personPage(who, p) {
   const n = await graph.counts(pathOf(p));
@@ -192,7 +259,7 @@ async function personPage(who, p) {
     <section class="person">
       ${avatar(p, 72)}
       <div>
-        <h1>${esc(title(p))}</h1>
+        <h1>${heading(p)}</h1>
         ${nobody ? `<p class="muted small">No account shows @${esc(p.handle)} now, so there is no one to follow.</p>` : ""}
         ${p.handle !== undefined ? `<p class="links"><a href="${esc(moniker.pageURL(`@${p.handle}`))}" target="_blank" rel="noopener">Moniker page</a></p>` : ""}
       </div>
@@ -238,7 +305,7 @@ async function listPage(who, list, p) {
 }
 
 /** A person's row, linked to their page. */
-const row = (p) => `<li><a href="${esc(link(p))}">${avatar(p, 40)}<span class="who"><strong>${esc(labelOf(p))}</strong></span></a></li>`;
+const row = (p) => `<li><a href="${esc(link(p))}">${avatar(p, 40)}<span class="who"><strong>${name(p)}</strong></span></a></li>`;
 
 function draw() {
   const ul = main.querySelector(".people");
