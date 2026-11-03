@@ -102,10 +102,10 @@ async function render() {
   }
 }
 
-// The front page's code sample: the library at the commit this page is built from.
+// The front page's code sample: the library at its latest release.
 const EMBED = `<follows-button target="@ada"></follows-button>
 <script type="module">
-  import { createFollows, defineFollowButton } from "https://cdn.jsdelivr.net/gh/adalinxx/follows@a910bff/src/browser.mjs";
+  import { createFollows, defineFollowButton } from "https://cdn.jsdelivr.net/gh/adalinxx/follows@v0.5.0/src/browser.mjs";
   import { createMoniker } from "https://cdn.jsdelivr.net/gh/adalinxx/moniker-sdk@2c3491b/src/browser.mjs";
   import { selfhold } from "./selfhold.mjs"; // @selfhold/web
 
