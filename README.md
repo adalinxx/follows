@@ -75,7 +75,7 @@ python3 -m http.server 8767   # from the repository root, then open http://127.0
 ## Use Follows in your app
 
 ```js
-import { createFollows, defineFollowButton, defineWho } from "https://cdn.jsdelivr.net/gh/adalinxx/follows@v0.4.0/src/browser.mjs";
+import { createFollows, defineFollowButton, defineWho } from "https://cdn.jsdelivr.net/gh/adalinxx/follows@v0.5.0/src/browser.mjs";
 import { createMoniker } from "https://cdn.jsdelivr.net/gh/adalinxx/moniker-sdk@2c3491b/src/browser.mjs";
 import { selfhold } from "./selfhold.mjs";        // @selfhold/web, from selfhold-wallet
 
