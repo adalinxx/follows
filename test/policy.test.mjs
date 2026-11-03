@@ -2,7 +2,7 @@
 // hand-made writes. Bodies are encoded by the Lattice SDK, whose encoding is
 // pinned to Lattice's vectors.
 //
-//   (cd policy && cargo build --release --target wasm32-unknown-unknown)
+//   policy/build.sh
 //   node --test test/
 //
 // With CONTEXT_DIR set, every context is recorded with its verdict so
@@ -38,23 +38,24 @@ function accepts(actions, { signers = [ALICE], accountActions = [] } = {}) {
   return accepted;
 }
 
-// A follow is of an account, or of `@` and a Moniker handle.
+// A follow is of an account.
 const CAROL = address(3);
-const [P, Q] = ["@alice", "@bob_2"];
+const [P, Q] = [address(4), address(5)];
+/** The `i`th of many well-formed addresses, without deriving a key for each. */
+const BASE32 = "abcdefghijklmnopqrstuvwxyz234567";
+const many = (i) => `bafyreia${[...i.toString(32).padStart(50, "0")].map((d) => BASE32[parseInt(d, 32)]).join("")}a`;
 const follow = (a, t) => `follows/${a}/${t}`;
 const follower = (a, t) => `followers/${t}/${a}`;
 /** Account `a` following `t`, as both keys, each with `change` ({ oldValue?, newValue? }). */
 const both = (a, t, change) => [{ key: follow(a, t), ...change }, { key: follower(a, t), ...change }];
 
-test("an account follows, refollows and unfollows an account or a handle, both keys at once", () => {
+test("an account follows, refollows and unfollows an account, both keys at once", () => {
   for (const t of [P, CAROL]) {
     assert.ok(accepts(both(ALICE, t, { newValue: "1" })), t);
     assert.ok(accepts(both(ALICE, t, { oldValue: "1", newValue: "1" })), t);
     assert.ok(accepts(both(ALICE, t, { oldValue: "1" })), t);
   }
   assert.ok(accepts([...both(ALICE, P, { newValue: "1" }), ...both(ALICE, Q, { newValue: "1" }), ...both(ALICE, CAROL, { newValue: "1" })]));
-  // Any handle, held by anyone or no one: Moniker's business, read by readers.
-  assert.ok(accepts(both(ALICE, "@nobody_yet", { newValue: "1" })));
 });
 
 test("one key without its twin is refused", () => {
@@ -65,8 +66,6 @@ test("one key without its twin is refused", () => {
   // A twin of another follow is no twin: another followed, another account.
   assert.ok(!accepts([{ key: follow(ALICE, P), newValue: "1" }, { key: follower(ALICE, Q), newValue: "1" }]));
   assert.ok(!accepts([{ key: follow(ALICE, P), newValue: "1" }, { key: follower(BOB, P), newValue: "1" }], { signers: [ALICE, BOB] }));
-  // An account and a handle are different targets, even for the same person.
-  assert.ok(!accepts([{ key: follow(ALICE, CAROL), newValue: "1" }, { key: follower(ALICE, `@${CAROL}`), newValue: "1" }]));
   // Ends swapped: Bob following Alice is no twin of Alice following Bob.
   assert.ok(!accepts([{ key: follow(ALICE, BOB), newValue: "1" }, { key: follower(BOB, ALICE), newValue: "1" }], { signers: [ALICE, BOB] }));
 });
@@ -79,7 +78,7 @@ test("the twin comes directly after: not first, not after other follows", () => 
 test("the work grows with the transaction, no faster", () => {
   const time = (n) => {
     const actions = [];
-    for (let i = 0; i < n; i++) actions.push(...both(ALICE, `@t${i}`, { newValue: "1" }));
+    for (let i = 0; i < n; i++) actions.push(...both(ALICE, many(i), { newValue: "1" }));
     const start = performance.now();
     assert.ok(accepts(actions));
     return performance.now() - start;
@@ -103,16 +102,16 @@ test("nobody writes or deletes another account's keys", () => {
   assert.ok(accepts([...both(ALICE, P, { newValue: "1" }), ...both(BOB, P, { newValue: "1" })], { signers: [ALICE, BOB] }));
 });
 
-test("a handle of any length may be followed", () => {
-  for (const h of ["a", "_", "0", "x".repeat(300), ALICE]) assert.ok(accepts(both(ALICE, `@${h}`, { newValue: "1" })), h);
+test("a handle is never followed: a follow is of an account", () => {
+  for (const h of ["@alice", "@a", "@_", "@0", `@${CAROL}`]) assert.ok(!accepts(both(ALICE, h, { newValue: "1" })), h);
 });
 
-test("only an account following an account or @handle is a record", () => {
-  for (const t of ["", "@", "alice", "@Alice", "@al-ice", "@al.ice", "@al ice", "@alicé", "@@alice", ALICE.toUpperCase(), `${ALICE}x`, "abcdefghijklmnop"]) {
+test("only an account following an account is a record", () => {
+  for (const t of ["", "@", "alice", "@alice", "@Alice", "@al-ice", "@@alice", ALICE.toUpperCase(), `${ALICE}x`, "abcdefghijklmnop"]) {
     assert.ok(!accepts(both(ALICE, t, { newValue: "1" })), `followed ${t}`);
   }
   // The follower must be an address, and sign.
-  for (const a of ["alice", "@alice", ALICE.toUpperCase(), `${ALICE}x`, ""]) assert.ok(!accepts(both(a, P, { newValue: "1" }), { signers: [ALICE, a] }), a);
+  for (const a of ["alice", "@alice", ALICE.toUpperCase(), `${ALICE}x`, ""]) assert.ok(!accepts(both(a, P, { newValue: "1" }), { signers: [ALICE] }), a);
   for (const key of [
     `${follow(ALICE, P)}/x`,
     `${follower(ALICE, P)}/x`,

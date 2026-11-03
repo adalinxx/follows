@@ -52,3 +52,49 @@ test("checks addresses and handles", () => {
   assert.ok(!isHandle(""));
   assert.ok(!isHandle(address.slice(0, 7) + "/x"));
 });
+
+// Enough of the SDK to read an empty Follows chain: every Volume is an empty trie root.
+const stateSDK = {
+  VolumeClient: class {
+    get = async () => ({ rootBytes: () => undefined, bytes: () => undefined });
+  },
+  HTTPVolumeTransport: class {},
+  decodeDagCbor: () => ({ count: 0, children: [] }),
+  decodeCanonicalBlock: () => ({ postStateCID: "post", specCID: "spec" }),
+  decodeCanonicalLatticeState: () => ({ generalStateCID: "root" }),
+};
+globalThis.fetch = async () => new Response(JSON.stringify({ hash: "tip" }));
+
+test("Selfhold is handed the write at once, as a promise, with no fee proposed", async () => {
+  let asked;
+  const wallet = {
+    isSelfholdWeb: true,
+    address: async () => address,
+    writeRecords: (request, options) => {
+      // Asked before the write is built: handed a promise, not a request.
+      assert.ok(request instanceof Promise);
+      asked = { request, options };
+      return Promise.resolve(request).then((r) => (r === null ? null : { transactionCID: "sent" }));
+    },
+  };
+  const graph = createFollows({ sdk: stateSDK, moniker, nodes: ["http://node.invalid"] });
+  const sent = await graph.follow("@ada", { wallet });
+  assert.deepEqual(sent, { transactionCID: "sent" });
+  assert.equal(asked.options.account, address);
+  const request = await asked.request;
+  assert.equal(request.fee, undefined, "the wallet pays what the hosts ask");
+  assert.deepEqual(request.chainPath, DEFAULTS.chain);
+  assert.deepEqual(request.actions.map((a) => a.key), [`follows/${address}/${other}`, `followers/${other}/${address}`] /* the account showing @ada */);
+});
+
+test("a wallet that takes only a built request gets one; nothing to write sends nothing", async () => {
+  const sent = [];
+  const wallet = { address: async () => address, writeRecords: async (request) => (sent.push(request), { transactionCID: "x" }) };
+  const graph = createFollows({ sdk: stateSDK, moniker, nodes: ["http://node.invalid"], fee: 2n });
+  await graph.follow("@ada", { wallet });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].fee, "2", "a fee given is proposed");
+  // Selfhold answers null when nothing needed writing: the library says undefined.
+  const selfhold = { isSelfholdWeb: true, address: async () => address, writeRecords: async (r) => ((await r) === null ? null : assert.fail("sent")) };
+  assert.equal(await graph.unfollow("@ada", { wallet: selfhold }), undefined);
+});

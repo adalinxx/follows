@@ -12,6 +12,7 @@
     "vendor"
   ],
   "scripts": {
+    "build:policy": "policy/build.sh",
     "test": "node --test test/*.test.mjs"
   }
 }

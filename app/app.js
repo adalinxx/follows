@@ -8,16 +8,23 @@
 //         #/<who>/followers        the accounts that follow them
 //         #/<who>/following        whom they follow
 //
-// An account follows an account, or a handle. A person shows by the handle
-// they show on Moniker, or by their account's tail when they show none.
+// An account follows an account. A person shows by the handle they show
+// on Moniker, or by their account's tail when they show none.
 //
 // A link may carry `?node=` (nodes, comma-separated), `?chain=` (the Follows
-// chain) and `?moniker=` (the Moniker chain) to read somewhere else.
+// chain) and `?moniker=` (the Moniker chain) to read somewhere else;
+// `?sponsor=` (a fee sponsor, or empty for none) and `?wallet=` (Selfhold's
+// window) to write through others.
+//
+// Writes go to Selfhold's window: a passkey makes the account, nothing to
+// install, and the fee sponsor takes a moment of this device's work for each
+// fee, so following needs no coins.
 import * as sdk from "../vendor/lattice-sdk.js";
 import { createFollows } from "../src/index.mjs";
 import { defineFollowButton } from "../src/element.mjs";
 import { createMoniker } from "./vendor/moniker-sdk/src/index.mjs";
 import { defineHandlePicker } from "./vendor/moniker-sdk/src/picker.mjs";
+import { selfhold } from "./vendor/selfhold.mjs";
 import { count, labelOf, matches, parseWho, pathOf } from "./lib.mjs";
 
 const MONIKER_APP = "https://app.moniker.bio/";
@@ -26,9 +33,17 @@ const nodes = params.get("node")?.split(",");
 const chainOf = (name) => params.get(name)?.split("/");
 const moniker = createMoniker({ sdk, app: MONIKER_APP, ...(nodes && { nodes }), ...(chainOf("moniker") && { chain: chainOf("moniker") }) });
 const graph = createFollows({ sdk, moniker, ...(nodes && { nodes }), ...(chainOf("chain") && { chain: chainOf("chain") }) });
-defineFollowButton(graph);
-defineHandlePicker(moniker, { app: MONIKER_APP });
-const wallet = () => globalThis.lattice;
+// The sponsor that takes this device's work for fees, as Stoa and Moniker use it.
+const SPONSOR = params.get("sponsor") ?? "https://lattice-testnet-apps-iad.fly.dev:8650/sponsor";
+const WALLET_PAGE = params.get("wallet") ?? "https://wallet.selfhold.app/";
+// Selfhold's window, for Follows' chain (sent to its nodes) and for Moniker's
+// (sent to Moniker's hosts). One address for both: it is kept per wallet page.
+const windowFor = (hosts) => selfhold({ use: "window", wallet: WALLET_PAGE, hosts, sponsor: () => SPONSOR || undefined });
+const web = windowFor(() => graph.nodes);
+const monikerWeb = windowFor(() => moniker.hosts());
+defineFollowButton(graph, { wallet: () => web });
+defineHandlePicker(moniker, { app: MONIKER_APP, wallet: () => monikerWeb });
+const wallet = () => web;
 
 const main = document.querySelector("main");
 const search = document.querySelector("#search");
@@ -105,13 +120,12 @@ async function home() {
 
 /**
  * You, under the search: your handle (or account), your counts, linked to
- * your lists, and a way to show a handle if you show none. Shown only once
- * Selfhold is connected; with Selfhold there but not yet connected, a button
- * connects it.
+ * your lists, and a way to show a handle if you show none. Before Selfhold
+ * is connected, a button connects it.
  */
 async function yours() {
   const section = main.querySelector(".mine");
-  if (!section || !wallet()?.writeRecords) return;
+  if (!section) return;
   let me;
   try {
     me = await wallet().address?.();
@@ -119,7 +133,8 @@ async function yours() {
   if (!main.contains(section)) return; // moved on meanwhile
   if (!me) {
     section.hidden = false;
-    section.innerHTML = `<h2>You</h2><button type="button" id="connect">Connect Selfhold</button>`;
+    section.innerHTML = `<h2>You</h2><button type="button" id="connect">Connect Selfhold</button>
+      <p class="muted small">Selfhold opens in a window: a passkey makes your account, with nothing to install. No coins needed: this device's work pays each fee.</p>`;
     section.querySelector("#connect").onclick = async () => {
       try {
         await wallet().connect();
@@ -178,7 +193,7 @@ async function personPage(who, p) {
       ${avatar(p, 72)}
       <div>
         <h1>${esc(title(p))}</h1>
-        ${nobody ? `<p class="muted small">No account shows @${esc(p.handle)} now. Follow it, and you follow whoever shows it next.</p>` : ""}
+        ${nobody ? `<p class="muted small">No account shows @${esc(p.handle)} now, so there is no one to follow.</p>` : ""}
         ${p.handle !== undefined ? `<p class="links"><a href="${esc(moniker.pageURL(`@${p.handle}`))}" target="_blank" rel="noopener">Moniker page</a></p>` : ""}
       </div>
     </section>

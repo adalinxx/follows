@@ -1,11 +1,11 @@
 // Apps keep no key: every write goes to the person's wallet through
-// `window.lattice.writeRecords`, which shows it, picks the nonce, signs with
+// `writeRecords`, which shows it, picks the nonce and the fee, signs with
 // the connected account and sends it.
 
-/** The wallet request for `actions` on `chainPath`. */
+/** The wallet request for `actions` on `chainPath`; a `fee` given is proposed, else the wallet pays what the hosts ask. */
 export function writeRequest(chainPath, { actions }, fee) {
   if (actions.length === 0) throw new Error("Nothing to write");
-  return { chainPath: [...chainPath], actions, fee: String(fee) };
+  return { chainPath: [...chainPath], actions, ...(fee !== undefined && { fee: String(fee) }) };
 }
 
 /**

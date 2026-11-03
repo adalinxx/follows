@@ -1,16 +1,14 @@
 //! Transaction-scope validity policy for Follows, the follow graph Lattice
 //! apps share.
 //!
-//! An account follows an account, or a handle: a Moniker name, followed
-//! whoever it points at. A follow of `<t>` by account `<a>` is two keys, so
-//! that both ends read by prefix:
+//! An account follows an account. A follow of `<t>` by account `<a>` is two
+//! keys, so that both ends read by prefix:
 //!
 //! - `follows/<a>/<t>`: what `<a>` follows.
 //! - `followers/<t>/<a>`: who follows `<t>`.
 //!
-//! `<a>` is an account address and must sign: only an account writes or
-//! deletes its own keys. `<t>` is an account address, or `@` and a handle,
-//! lowercase letters, digits and `_`. A transaction that writes `follows/`
+//! `<a>` and `<t>` are account addresses, and `<a>` must sign: only an
+//! account writes or deletes its own keys. A transaction that writes `follows/`
 //! writes its `followers/` twin directly after, to the same new value, or
 //! deletes both. The chain starts with neither, so the two always agree, and
 //! the policy reads each pair once. Values mean nothing else to the chain.
@@ -64,19 +62,6 @@ fn parse(key: &[u8]) -> Option<Follow<'_>> {
     };
     let (first, second) = (segments.next()?, segments.next()?);
     let (account, followed) = if by_follower { (first, second) } else { (second, first) };
-    let well_formed = segments.next().is_none() && is_address(account) && is_followed(followed);
+    let well_formed = segments.next().is_none() && is_address(account) && is_address(followed);
     well_formed.then_some(Follow { account, followed, by_follower })
-}
-
-/// What an account follows: an account address, or `@` and a Moniker handle.
-fn is_followed(text: &[u8]) -> bool {
-    match text.split_first() {
-        Some((b'@', handle)) => is_handle(handle),
-        _ => is_address(text),
-    }
-}
-
-/// A Moniker handle: lowercase letters, digits and `_`.
-fn is_handle(text: &[u8]) -> bool {
-    !text.is_empty() && text.iter().all(|&byte| matches!(byte, b'a'..=b'z' | b'0'..=b'9' | b'_'))
 }

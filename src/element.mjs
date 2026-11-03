@@ -1,16 +1,17 @@
 // <follows-button target="@ada"> for any page: Follow / Following for a
 // person, followed by the account connected in the person's Selfhold
 // wallet. `target` is a handle (with or without @) or an account address.
-// Register it once with a graph from createFollows:
+// Register it once with a graph from createFollows, and the wallet:
 //
-//   defineFollowButton(graph);
+//   const wallet = selfhold({ hosts: () => graph.nodes, sponsor: () => SPONSOR }); // @selfhold/web
+//   defineFollowButton(graph, { wallet: () => wallet });
 //   <follows-button target="@ada"></follows-button>
 //   <follows-button target="bafyrei…"></follows-button>
 //
-// It says whom it follows, "Follow @ada", when they show a handle, and
-// follows that handle; for someone with none it says "Follow" and follows
-// their account. No handle is needed to follow. It hides on the connected
-// account itself.
+// It follows the person's account: for a handle, the account showing it.
+// It says "Follow @ada" when they show a handle, else "Follow"; no handle
+// is needed to follow. It hides on the connected account itself, and for a
+// handle no account shows, as there is no one to follow.
 //
 // A follow takes about a block to save: the button shows the new state at
 // once, and its note says it is saving until the chain shows it, then
@@ -18,7 +19,11 @@
 // still waiting in a node's mempool, sent from this page or anywhere else,
 // shows as saving too. With no wallet it fires `follows:needs-wallet`
 // ({ target }); a page that handles it (preventDefault) shows its own help,
-// else the button says how to get one.
+// else the button says how to get one. The wallet defaults to Selfhold for
+// Chrome (window.lattice), which pays fees in coins; with Selfhold's window
+// and a fee sponsor, the device's work pays them and no coins are needed.
+// Selfhold's window opens only from a click, so a press that has to connect
+// first connects, shows where the account stands, and asks for a second press.
 // Style it from outside with --follows-accent, --follows-accent-ink,
 // --follows-ink, --follows-line, --follows-muted, --follows-width and
 // --follows-note-align.
@@ -55,6 +60,16 @@ const escape = (text) => String(text).replace(/[&<>"']/g, (c) => `&#${c.charCode
 /** What went wrong, for a person. */
 function problem(error) {
   const text = String(error?.message ?? error);
+  switch (error?.code) {
+    case "PopupBlocked": return "The browser blocked Selfhold's window. Allow pop-ups for this site, then try again.";
+    case "Closed": case "Reloaded": return "Selfhold's window closed. Nothing was sent.";
+    case "NeedsCoins": return error.sponsor === "down" || error.sponsor === "dear"
+      ? "This device's work couldn't pay the fee just now. Try again in a few minutes."
+      : "The fee couldn't be paid in work, and this account has no coins for it.";
+    case "AccountChanged": case "NotConnected": return "Selfhold is connected to another account now. Check, then press again.";
+  }
+  if (/yourself/.test(text)) return "You can't follow yourself.";
+  if (/just declined|ask again in a moment/i.test(text)) return "Selfhold waits a few seconds after a decline. Try again in a moment.";
   if (/declined|rejected|denied|cancel/i.test(text)) return "Canceled in Selfhold. Nothing was sent.";
   if (/locked/i.test(text)) return "Unlock Selfhold, then try again.";
   return "Couldn't save. Try again.";
@@ -71,6 +86,7 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
       #state = "loading"; // loading | follow | following | saving
       #want = true;
       #me = null; // the account the button was read for
+      #asking = false; // the wallet is asked, and hasn't answered
       #who = null; // whom the target names: { account, handle } or { handle }
       #button;
       #now;
@@ -112,15 +128,10 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         this.#button.toggleAttribute("aria-busy", state === "loading");
         this.#note.innerHTML = note;
       }
-      /** The keys a change to this person's follow is saved under: their account and their handle. */
-      #forms() {
-        return [this.#who?.account, this.#who?.handle === undefined ? undefined : `@${this.#who.handle}`].filter(Boolean);
-      }
       /** Whether a change to this follow waits in a mempool, and which way: true, false, or undefined. */
       async #waiting(me) {
         const pending = await graph.pending(me).catch(() => ({}));
-        const found = this.#forms().filter((t) => t in pending);
-        return found.length === 0 ? undefined : found.some((t) => pending[t]);
+        return this.#who?.account === undefined ? undefined : pending[this.#who.account];
       }
       /**
        * Whom the target names, and whether the connected account follows
@@ -136,8 +147,8 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
           if (ticket !== this.#drawn) return;
           this.#who = who;
           this.#me = me ?? null;
-          // Nobody follows themselves here.
-          if (me && who.account === me) {
+          // Nobody follows themselves here, nor a handle no account shows.
+          if (who.account === undefined || (me && who.account === me)) {
             this.hidden = true;
             return;
           }
@@ -188,7 +199,7 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         this.dispatchEvent(new CustomEvent("follows:change", { bubbles: true, composed: true, detail: { target, following: this.#want } }));
       }
       async #press() {
-        if (this.#state === "loading" || this.#state === "saving") return;
+        if (this.#state === "loading" || this.#state === "saving" || this.#asking) return;
         const target = this.#target;
         if (!wallet()?.writeRecords) {
           const asked = new CustomEvent("follows:needs-wallet", { bubbles: true, composed: true, cancelable: true, detail: { target } });
@@ -201,9 +212,13 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
         }
         const ticket = ++this.#drawn;
         const before = this.#state;
+        // Selfhold's window, rather than the extension: it opens only from a click.
+        const windowed = wallet().isSelfholdWeb && wallet().kind === "window";
+        this.#asking = true;
         try {
           // Selfhold answers connect only within a click: ask before any other wait.
-          const me = (await wallet().address?.()) ?? (await wallet().connect());
+          const given = await wallet().address?.();
+          const me = given ?? (await wallet().connect());
           if (ticket !== this.#drawn) return;
           if (this.#me !== null && me !== this.#me) {
             // What the button showed was for another account: show this one's, and send nothing.
@@ -224,13 +239,17 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
               this.hidden = true;
               return;
             }
-            if (await graph.follows(me, target)) {
-              if (ticket === this.#drawn) this.#show("following");
+            const following = await graph.follows(me, target);
+            if (following || (windowed && !given)) {
+              // Connecting took the click Selfhold's window needs: the next press sends.
+              if (ticket === this.#drawn) this.#show(following ? "following" : "follow", following ? "" : "Connected. Press Follow to follow.");
               return;
             }
           }
           this.#want = before !== "following";
+          if (windowed) this.#show(before, "Continue in Selfhold's window.");
           const sent = await (this.#want ? graph.follow(target, { wallet: wallet() }) : graph.unfollow(target, { wallet: wallet() }));
+          this.#asking = false;
           if (ticket !== this.#drawn) return;
           if (sent === undefined) {
             // Already as asked: nothing to save.
@@ -241,6 +260,8 @@ export function defineFollowButton(graph, { tag = "follows-button", walletURL = 
           await this.#landed(ticket, me);
         } catch (error) {
           if (ticket === this.#drawn) this.#show(before, problem(error));
+        } finally {
+          this.#asking = false;
         }
       }
     },

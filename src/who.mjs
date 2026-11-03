@@ -5,7 +5,7 @@
 // Moniker and Follows pages. Register it once with a graph from
 // createFollows, and a reader of your app's own card:
 //
-//   defineWho(graph, { card: async (address) => ({ name, photo, bio }) });
+//   defineWho(graph, { card: async (address) => ({ name, photo, bio }), wallet: () => wallet });
 //   <follows-who address="bafyrei…"><moniker-name address="bafyrei…" name="Dana" plain></moniker-name></follows-who>
 //
 // What it wraps is inside a button, so wrap a name without a link of its
@@ -14,7 +14,8 @@
 // is a URL. Card text is shown as text, with every @ dropped, so only a
 // verified handle shows with an @. Style it from outside with the
 // --follows-* properties the button takes, and --follows-surface for the
-// card's backdrop.
+// card's backdrop. `wallet` is the card's Follow button's, as
+// defineFollowButton takes it.
 
 import { defineFollowButton } from "./element.mjs";
 
@@ -46,9 +47,9 @@ const style = `
 /** Card text as text: every @ (and its look-alikes) and invisible control dropped, as Moniker's displayName does. */
 const plain = (text) => String(text ?? "").replace(/[@\uFF20\uFE6B\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g, "").trim();
 
-export function defineWho(graph, { tag = "follows-who", card = async () => undefined, buttonTag = "follows-button", followsURL = FOLLOWS_APP } = {}) {
+export function defineWho(graph, { tag = "follows-who", card = async () => undefined, buttonTag = "follows-button", followsURL = FOLLOWS_APP, wallet } = {}) {
   if (customElements.get(tag)) return;
-  defineFollowButton(graph, { tag: buttonTag });
+  defineFollowButton(graph, { tag: buttonTag, ...(wallet && { wallet }) });
 
   customElements.define(
     tag,
