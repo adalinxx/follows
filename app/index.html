@@ -5,31 +5,38 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Follows</title>
 <meta name="description" content="One follow list for every app. See who follows any @handle, and whom it follows.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='8' cy='9' r='4' fill='%233346D3'/%3E%3Ccircle cx='17' cy='9' r='3' fill='%233346D3' opacity='.6'/%3E%3Cpath d='M1 21c0-4 3-7 7-7s7 3 7 7z' fill='%233346D3'/%3E%3Cpath d='M15 21c0-2.5-.8-4.6-2.2-6.1A5.5 5.5 0 0 1 23 18.5V21z' fill='%233346D3' opacity='.6'/%3E%3C/svg%3E">
+<link rel="icon" href="brand/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="brand/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="brand/favicon-16.png" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="brand/apple-touch-icon.png">
+<meta name="theme-color" content="#3346d3">
 <style>
 @font-face { font-family: "Schibsted Grotesk"; font-weight: 400 900; font-display: swap; src: url(fonts/schibsted-grotesk-latin.woff2) format("woff2");
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
 @font-face { font-family: "Schibsted Grotesk"; font-weight: 400 900; font-display: swap; src: url(fonts/schibsted-grotesk-latin-ext.woff2) format("woff2");
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1E00-1E9F, U+20A0-20AB, U+20AD-20C4, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "JetBrains Mono"; font-weight: 400; font-display: swap; src: url(fonts/jetbrains-mono-400.woff2) format("woff2"); }
+/* Colors from follows-brand (tokens.json): Ink, Slate, Mist, Paper, Cloud; Indigo; Haze. */
 :root {
   --ink: #16181D; --muted: #5F6470; --line: #E6E7EB; --bg: #FFFFFF; --soft: #F4F5F7;
-  --accent: #3346D3; --accent-ink: #1F2DA0; --avatar: #E3E6F8; --avatar-ink: #3346D3;
+  --accent: #3346D3; --accent-ink: #1F2DA0; --avatar: #E3E6F8; --avatar-ink: #3346D3; --on-accent: #FFFFFF;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --ink: #ECEDF0; --muted: #A3A8B3; --line: #2C2F36; --bg: #121418; --soft: #1C1F24;
-    --accent: #8D9BFF; --accent-ink: #B4BEFF; --avatar: #262B45; --avatar-ink: #B4BEFF;
+    --accent: #8D9BFF; --accent-ink: #B4BEFF; --avatar: #262B45; --avatar-ink: #B4BEFF; --on-accent: #121418;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --ink: #ECEDF0; --muted: #A3A8B3; --line: #2C2F36; --bg: #121418; --soft: #1C1F24;
-  --accent: #8D9BFF; --accent-ink: #B4BEFF; --avatar: #262B45; --avatar-ink: #B4BEFF;
+  --accent: #8D9BFF; --accent-ink: #B4BEFF; --avatar: #262B45; --avatar-ink: #B4BEFF; --on-accent: #121418;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 "Schibsted Grotesk", system-ui, -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
 a { color: var(--accent); }
 a:hover { color: var(--accent-ink); }
 button, input { font: inherit; color: inherit; }
@@ -45,19 +52,19 @@ p { margin: 0; }
 .wrap { max-width: 640px; margin: 0 auto; padding: 0 16px; }
 header { border-bottom: 1px solid var(--line); }
 header .wrap { display: flex; align-items: center; gap: 16px; padding-top: 12px; padding-bottom: 12px; }
-.brand { font-weight: 800; font-size: 19px; color: var(--ink); text-decoration: none; }
+.brand { display: inline-flex; flex: none; padding: 8px 0; }
+.brand svg { display: block; height: 24px; width: auto; }
+.follows-disc { fill: var(--accent); }
+.follows-ink { fill: var(--ink); }
+.tail { font-family: var(--mono); font-size: 0.92em; }
 #find { flex: 1; display: flex; gap: 8px; min-width: 0; }
 input[type="search"] { flex: 1; min-width: 0; height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); }
 button.link { all: unset; color: var(--accent); text-decoration: underline; cursor: pointer; }
 button.link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 input[type="search"]:focus { background: var(--bg); border-color: var(--accent); outline: none; }
-button { height: 40px; padding: 0 16px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 600; cursor: pointer; }
-:root[data-theme="dark"] button { color: #121418; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) button { color: #121418; } }
+button { height: 40px; padding: 0 16px; border: 0; border-radius: 8px; background: var(--accent); color: var(--on-accent); font-weight: 600; cursor: pointer; }
 
 main.wrap { padding-top: 32px; padding-bottom: 48px; }
-.home h1 { font-size: 32px; line-height: 1.15; margin-bottom: 12px; }
-.home p { max-width: 34em; }
 .status { padding: 24px 0; }
 .status button { margin-top: 12px; }
 
@@ -72,8 +79,7 @@ h2.section { font-size: 15px; color: var(--muted); margin: 28px 0 4px; }
 .counts a:hover { text-decoration: underline; }
 .follow { display: flex; }
 follows-button { --follows-accent: var(--accent); --follows-ink: var(--ink); --follows-line: var(--line); --follows-muted: var(--muted); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) follows-button { --follows-accent-ink: #121418; } }
-:root[data-theme="dark"] follows-button { --follows-accent-ink: #121418; }
+follows-button { --follows-accent-ink: var(--on-accent); }
 .back { display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; }
 .list-title { font-size: 22px; margin: 4px 0 12px; }
 .more { margin-top: 16px; width: 100%; background: var(--bg); color: var(--ink); border: 1px solid var(--line); }
@@ -98,10 +104,63 @@ follows-button { --follows-accent: var(--accent); --follows-ink: var(--ink); --f
 .avatar { flex: none; width: var(--size); height: var(--size); border-radius: 50%; overflow: hidden; display: grid; place-items: center;
   background: var(--avatar); color: var(--avatar-ink); font-weight: 700; font-size: calc(var(--size) * 0.42); }
 
+/* The front page: wider than the reading column, the header with it. */
+.on-home .wrap { max-width: 1040px; }
+.hero { display: grid; gap: 40px; align-items: center; padding-bottom: 16px; }
+.hero h1 { font-size: 32px; line-height: 1.1; font-weight: 800; margin-bottom: 16px; text-wrap: balance; }
+.hero .lede { font-size: 18px; line-height: 1.45; color: var(--muted); max-width: 30em; }
+.hero .mine { margin-top: 28px; }
+@media (min-width: 860px) {
+  .hero { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 56px; padding: 24px 0 32px; }
+  .hero h1 { font-size: 52px; line-height: 1.04; }
+}
+
+/* One follow, read by every app: the hero's picture, in the mark's own shapes. */
+.graph { margin: 0; padding: 28px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); display: grid; gap: 0; min-width: 0; }
+.pair { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.node { display: inline-flex; align-items: center; gap: 10px; padding: 8px 14px 8px 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; font-weight: 700; }
+.node i { flex: none; width: 24px; height: 24px; border-radius: 50%; }
+.node .disc { background: var(--accent); }
+.node .ring { border: 5px solid var(--ink); }
+.edge { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 14px; }
+.edge::after { content: ""; width: 28px; height: 2px; background: var(--muted); }
+.chain { margin: 0; padding: 14px 0 14px 21px; border-left: 2px solid var(--line); margin-left: 20px; color: var(--muted); font-size: 14px; }
+.readers { list-style: none; margin: 0 0 0 20px; padding: 0; display: grid; gap: 8px; border-left: 2px solid var(--line); padding-left: 21px; }
+.readers li { display: grid; gap: 2px; padding: 12px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.readers b { font-weight: 700; }
+.readers span { color: var(--muted); font-size: 14px; }
+.readers code { font-family: var(--mono); font-size: 13.6px; color: var(--ink); overflow-wrap: anywhere; }
+
+.band { padding: 48px 0 8px; border-top: 1px solid var(--line); margin-top: 40px; }
+.band > h2 { font-size: 26px; line-height: 1.2; margin: 0 0 8px; text-wrap: balance; }
+.band > p { color: var(--muted); max-width: 36em; }
+.steps { list-style: none; counter-reset: step; margin: 24px 0 0; padding: 0; display: grid; gap: 24px; }
+.steps li { counter-increment: step; display: grid; gap: 6px; align-content: start; }
+.steps li::before { content: counter(step); display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--avatar); color: var(--avatar-ink); font-weight: 700; margin-bottom: 6px; }
+.steps h3, .facts h3 { font-size: 18px; line-height: 1.3; margin: 0; }
+.steps p, .facts p { color: var(--muted); }
+.facts { display: grid; gap: 28px 40px; margin-top: 24px; }
+.apps { list-style: none; margin: 24px 0 0; padding: 0; display: grid; gap: 16px; }
+.apps a { display: grid; gap: 4px; height: 100%; padding: 20px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); text-decoration: none; }
+.apps a:hover { border-color: var(--accent); }
+.apps a strong { font-size: 18px; }
+.apps a span { color: var(--muted); }
+.apps a em { font-style: normal; color: var(--accent); font-weight: 600; margin-top: 8px; }
+.code { margin: 24px 0 12px; padding: 20px; background: var(--soft); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; font: 13.6px/1.6 var(--mono); color: var(--ink); }
+.foot { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 14px; color: var(--muted); }
+.foot p { flex: 1 1 20em; }
+@media (min-width: 720px) {
+  .steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .apps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 @media (max-width: 480px) {
+  .graph { padding: 18px; }
+  .pair { gap: 8px; }
+  .edge::after { width: 14px; }
   header .wrap { flex-wrap: wrap; gap: 8px; }
   #find { flex-basis: 100%; }
-  .home h1 { font-size: 26px; }
 }
 /* A heading focused after a page change marks where to start reading, without a ring. */
 h1[tabindex="-1"]:focus { outline: none; }
@@ -110,7 +169,7 @@ h1[tabindex="-1"]:focus { outline: none; }
 <body>
 <header>
   <div class="wrap">
-    <a class="brand" href="#/">Follows</a>
+    <a class="brand" href="#/" aria-label="Follows, home"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -1 180.392 25.452" aria-hidden="true" focusable="false"><mask id="follows-lockup-mask" maskUnits="userSpaceOnUse"><rect x="-1" y="-1" width="42" height="26" fill="#fff"/><path d="M-2.5 12a14.5 14.5 0 1 0 29 0a14.5 14.5 0 1 0 -29 0z" fill="#000"/></mask><path d="M16 12a12 12 0 1 0 24 0a12 12 0 1 0 -24 0zM21 12a7 7 0 1 0 14 0a7 7 0 1 0 -14 0z" class="follows-ink" fill-rule="evenodd" mask="url(#follows-lockup-mask)"/><path d="M0 12a12 12 0 1 0 24 0a12 12 0 1 0 -24 0z" class="follows-disc"/><path class="follows-ink" d="M52.0 24.0V0.0H69.29595947265625V5.112902832031249H58.01304117838542V9.381960042317708H67.77442220052083V14.494862874348959H58.01304117838542V24.0ZM80.21563310576201 24.452400716145835Q77.42218450579486 24.452400716145835 75.29034215318835 23.251296640903785Q73.15849980058184 22.050192565661735 71.96393296506957 19.91676294949753Q70.7693661295573 17.78333333333333 70.7693661295573 14.993449910481772Q70.7693661295573 12.203566487630209 71.96369417048552 10.074327608840392Q73.15802221141375 7.945088730050575 75.28943840753182 6.746344006952372Q77.42085460364989 5.547599283854169 80.21374479166667 5.547599283854169Q83.02218188476563 5.547599283854169 85.15201790364583 6.745816040039063Q87.28185392252604 7.944032796223958 88.4830888671875 10.07201730464321Q89.68432381184897 12.200001813062466 89.68432381184897 14.99821766271613Q89.68432381184897 17.79643351236979 88.48573061599873 19.92567239115961Q87.28713742014848 22.054911269949425 85.14810956293883 23.25365599304763Q83.00908170572917 24.452400716145835 80.21563310576201 24.452400716145835ZM80.22847232213623 20.25884195963542Q81.80743172200522 20.25884195963542 82.7191240234375 18.844908036525894Q83.6308163248698 17.430974113416372 83.6308163248698 15.0Q83.6308163248698 12.568178304036458 82.71749667200442 11.15466817220052Q81.80417701913902 9.741158040364583 80.22521761927003 9.741158040364583Q78.64625821940105 9.741158040364583 77.73456591796875 11.15466817220052Q76.82287361653647 12.568178304036458 76.82287361653647 15.0Q76.82287361653647 17.441355387369793 77.73619326940187 18.850098673502607Q78.64951292226725 20.25884195963542 80.22847232213623 20.25884195963542ZM97.26809423828126 24.0Q94.8783094889323 24.0 93.69840429687501 22.918311564127606Q92.51849910481772 21.83662312825521 92.51849910481772 19.70527547200521V-1.0H98.35774064127605V18.902874755859376Q98.35774064127605 19.46073486328125 98.51607397460938 19.646688232421873Q98.67440730794272 19.8326416015625 99.19107397460938 19.8326416015625H100.43016699218751V24.0ZM107.5934275716146 24.0Q105.20364282226564 24.0 104.02373763020834 22.918311564127606Q102.84383243815105 21.83662312825521 102.84383243815105 19.70527547200521V-1.0H108.68307397460939V18.902874755859376Q108.68307397460939 19.46073486328125 108.84140730794272 19.646688232421873Q108.99974064127605 19.8326416015625 109.51640730794271 19.8326416015625H110.75550032552084V24.0ZM121.57496643909536 24.452400716145835Q118.7815178391282 24.452400716145835 116.64967548652169 23.251296640903785Q114.51783313391518 22.050192565661735 113.3232662984029 19.91676294949753Q112.12869946289064 17.78333333333333 112.12869946289064 14.993449910481772Q112.12869946289064 12.203566487630209 113.32302750381886 10.074327608840392Q114.51735554474709 7.945088730050575 116.64877174086516 6.746344006952372Q118.78018793698322 5.547599283854169 121.57307812500001 5.547599283854169Q124.38151521809897 5.547599283854169 126.51135123697918 6.745816040039063Q128.6411872558594 7.944032796223958 129.84242220052084 10.07201730464321Q131.0436571451823 12.200001813062466 131.0436571451823 14.99821766271613Q131.0436571451823 17.79643351236979 129.84506394933206 19.92567239115961Q128.64647075348182 22.054911269949425 126.50744289627217 23.25365599304763Q124.36841503906251 24.452400716145835 121.57496643909536 24.452400716145835ZM121.58780565546957 20.25884195963542Q123.16676505533854 20.25884195963542 124.07845735677084 18.844908036525894Q124.99014965820314 17.430974113416372 124.99014965820314 15.0Q124.99014965820314 12.568178304036458 124.07683000533774 11.15466817220052Q123.16351035247234 9.741158040364583 121.58455095260337 9.741158040364583Q120.00559155273439 9.741158040364583 119.09389925130209 11.15466817220052Q118.1822069498698 12.568178304036458 118.1822069498698 15.0Q118.1822069498698 17.441355387369793 119.09552660273519 18.850098673502607Q120.00884625560059 20.25884195963542 121.58780565546957 20.25884195963542ZM136.54662312825522 24.0 132.41123494466146 6.0H138.4433435058594L140.8140506998698 20.3801025390625H140.4283858235677L143.56843709309896 6.0H151.38669474283853L154.47907755533853 20.39553426106771H154.01007934570313L156.47962076822915 6.0H162.1318241373698L157.97023559570312 24.0H149.8841455078125L146.79882649739582 7.899999999999999H147.8097334798177L144.63271321614585 24.0ZM172.0262838541667 24.452400716145835Q169.95838224283858 24.452400716145835 168.0719615478516 23.88278503417969Q166.18554085286462 23.313169352213542 164.8866374511719 22.083437093098958Q163.5877340494792 20.853704833984374 163.25083422851566 18.850138346354168L168.42429817708336 17.82496541341146Q168.56833097330733 19.103220621744793 169.3616079508464 19.76974894205729Q170.15488492838546 20.436277262369792 171.77978116861982 20.436277262369792Q173.3356100260417 20.436277262369792 174.01342069498702 19.89893290201823Q174.69123136393233 19.361588541666666 174.69123136393233 18.663031005859374Q174.69123136393233 18.046571858723958 174.12881783040368 17.520440673828126Q173.56640429687502 16.99430948893229 172.0402039388021 16.78957722981771L170.61668098958336 16.582513427734376Q169.62854622395835 16.442047119140625 168.47549344889325 16.194447835286457Q167.32244067382814 15.946848551432291 166.29438789876303 15.426615397135416Q165.26633512369796 14.906382242838541 164.61389982096358 13.954564412434895Q163.9614645182292 13.00274658203125 163.9614645182292 11.463376871744792Q163.9614645182292 9.670509847005208 164.92576505533856 8.342457071940103Q165.89006559244794 7.014404296875 167.65741890462243 6.281001790364584Q169.4247722167969 5.547599283854169 171.79404711914066 5.547599283854169Q173.8452820638021 5.547599283854169 175.6061198730469 6.13449910481771Q177.36695768229168 6.721398925781251 178.57481188964846 7.877366129557292Q179.78266609700523 9.033333333333333 180.13506681315107 10.76076863606771L175.0212057291667 11.82284138997396Q174.90453906250002 11.264680989583333 174.61709094238284 10.724283854166668Q174.32964282226564 10.183886718750001 173.72436226399742 9.8279541015625Q173.1190817057292 9.472021484375 172.03225105794274 9.472021484375Q170.86215625000003 9.472021484375 170.249846476237 9.912418619791666Q169.637536702474 10.352815755208333 169.637536702474 11.027573649088541Q169.637536702474 11.616805013020834 170.08458768717452 11.97626953125Q170.53163867187502 12.335734049479166 171.26377164713546 12.53984883626302Q171.99590462239587 12.743963623046875 172.84460050455732 12.87606201171875L174.57656054687502 13.133125813802083Q176.0158610839844 13.337858072916667 177.34984647623702 13.915841674804689Q178.68383186848962 14.493825276692709 179.5380504150391 15.595060221354167Q180.39226896158857 16.696295166015624 180.39226896158857 18.48326416015625Q180.39226896158857 20.45 179.29099943033856 21.780967203776044Q178.18972989908858 23.111934407552084 176.29377551269533 23.782167561848958Q174.39782112630212 24.452400716145835 172.0262838541667 24.452400716145835Z"/></svg></a>
     <form id="find" role="search">
       <label class="sr" for="search">A @handle or an account</label>
       <input id="search" type="search" placeholder="Search @handle" autocomplete="off" spellcheck="false">

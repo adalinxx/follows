@@ -45,7 +45,11 @@ account, as it is when the follow is made. So:
 Live at https://adalinxx.github.io/follows/app/, reading the Follows testnet
 trial and Moniker on `Nexus/moniker`.
 
-`app/` is a static page: search a `@handle` or an account to see how many
+`app/` is a static page. Its front page says what Follows is and how it
+works, names the apps that read it, and shows the Follow button's embed code.
+The logo, favicons (`app/brand/`), colors and fonts come from
+[follows-brand](https://github.com/adalinxx/follows-brand); account tails are
+set in JetBrains Mono. Search a `@handle` or an account to see how many
 follow them and how many they follow, and both lists. People show by the
 handle they show, or by their account's last four characters when they show
 none; each links to their page, and long lists have a filter. Follow them
