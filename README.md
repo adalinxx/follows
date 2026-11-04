@@ -42,7 +42,7 @@ account, as it is when the follow is made. So:
 
 ## The page
 
-Live at https://adalinxx.github.io/follows/app/, reading the Follows testnet
+Live at https://follows.social, reading the Follows testnet
 trial and Moniker on `Nexus/moniker`.
 
 `app/` is a static page. Its front page says what Follows is and how it
