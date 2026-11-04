@@ -72,6 +72,11 @@ handle is read from Moniker through
 python3 -m http.server 8767   # from the repository root, then open http://127.0.0.1:8767/app/
 ```
 
+follows.social serves the page at its root. On each push to `main`, the Pages
+workflow runs `site/build.sh`, which puts `app/` at the root with `src/` and the
+Lattice SDK beside it, and keeps `/app/` as a redirect to `/` for old links.
+`site/build.sh` builds the same site into `_site/` to try locally.
+
 ## Use Follows in your app
 
 ```js
