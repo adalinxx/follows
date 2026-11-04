@@ -19,7 +19,7 @@
 
 import { defineFollowButton } from "./element.mjs";
 
-const FOLLOWS_APP = "https://adalinxx.github.io/follows/app/";
+const FOLLOWS_APP = "https://follows.social/app/";
 
 const style = `
   :host { display: inline; }
