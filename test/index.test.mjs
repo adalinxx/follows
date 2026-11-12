@@ -59,6 +59,13 @@ const stateSDK = {
     get = async () => ({ rootBytes: () => undefined, bytes: () => undefined });
   },
   HTTPVolumeTransport: class {},
+  // Every chain is read from the first node given.
+  ChainNodes: class {
+    constructor(start) {
+      this.start = start;
+    }
+    read = (chain, read) => read({ url: this.start[0], found: false });
+  },
   decodeDagCbor: () => ({ count: 0, children: [] }),
   decodeCanonicalBlock: () => ({ postStateCID: "post", specCID: "spec" }),
   decodeCanonicalLatticeState: () => ({ generalStateCID: "root" }),

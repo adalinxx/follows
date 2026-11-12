@@ -12,16 +12,18 @@
 // Following @bob follows the account showing @bob now, and the follow stays
 // with that account if the handle changes hands.
 //
-// Reads go to the first of `nodes` that answers and are checked by CID, so
-// they do not depend on trusting that node. Writes go to the wallet, which
+// Reads go to the nodes that serve the chain, found from `nodes` (the SDK's
+// ChainNodes: those of `nodes` that serve it, else the hosts the chain's
+// directory declares), and are checked by CID, so they do not depend on
+// trusting any node. Writes go to the wallet, which
 // shows them to the person, pays the fee and signs; this library never
 // holds a key. Selfhold's window pays the fee with the device's work through
 // a fee sponsor, so following needs no coins.
 import * as records from "./records/follows.mjs";
-import { anyHost, tip, view, volumeLoader } from "./records/state.mjs";
+import { tip, view, volumeLoader } from "./records/state.mjs";
 import { writeRequest } from "./records/wallet.mjs";
 
-/** Where Follows lives now: its testnet trial chain and the shared hosts. */
+/** Where Follows lives now: its testnet trial chain, and the nodes its hosts are found from. */
 export const DEFAULTS = {
   chain: ["Nexus", "testnet", "follows-449390"],
   nodes: ["https://lattice-testnet-apps-iad.fly.dev", "https://lattice-testnet-apps-ams.fly.dev"],
@@ -39,25 +41,28 @@ export function createFollows(options) {
     pointers: (handles) => Promise.all(handles.map((h) => moniker.pointer(h))),
     handlesOf: (addresses) => moniker.handlesOf(addresses),
   };
-  const volumes = new sdk.VolumeClient(anyHost(nodes.map((node) => new sdk.HTTPVolumeTransport(`${node}/volumes`, { chainPath: chain }))));
-  const load = volumeLoader(volumes, sdk.decodeDagCbor);
+  // Made at the first read, so a node address it refuses fails the reads, not createFollows.
+  let found;
+  const chainNodes = () => (found ??= new sdk.ChainNodes(nodes, { fetch: (...args) => fetch(...args) }));
+  // Per node: its Volumes, and the trie nodes read from them, kept.
+  const sources = new Map();
+  function on(url) {
+    if (!sources.has(url)) {
+      const volumes = new sdk.VolumeClient(new sdk.HTTPVolumeTransport(`${url}/volumes`, { chainPath: chain }));
+      sources.set(url, { volumes, load: volumeLoader(volumes, sdk.decodeDagCbor) });
+    }
+    return sources.get(url);
+  }
 
   let current = null; // { at, state: Promise }
-  /** The chain's state at the tip of the first node that answers, reused for `freshFor` ms. */
+  /** The chain's state at the tip of the first node serving it that answers, reused for `freshFor` ms. */
   function state({ fresh = false } = {}) {
     if (!fresh && current && Date.now() - current.at < freshFor) return current.state;
-    const read = (async () => {
-      let failure;
-      for (const node of nodes) {
-        try {
-          const { generalStateCID } = await tip(sdk, node, chain, volumes);
-          return view(load, generalStateCID);
-        } catch (error) {
-          failure = error;
-        }
-      }
-      throw new Error(`No node is serving ${chain.join("/")}`, { cause: failure });
-    })();
+    const read = chainNodes().read(chain, async (node) => {
+      const { volumes, load } = on(node.url);
+      const { generalStateCID } = await tip(sdk, node.url, chain, volumes);
+      return view(load, generalStateCID);
+    });
     current = { at: Date.now(), state: read };
     read.catch(() => current?.state === read && (current = null));
     return read;
@@ -118,16 +123,17 @@ export function createFollows(options) {
     follows: async (account, who) => records.follows(await state(), names, account, who),
     /**
      * What `account` is saving now: follows (`true`) and unfollows (`false`)
-     * waiting in the first answering node's mempool, by followed account.
+     * waiting in the mempool of the first node serving the chain that answers, by followed account.
      */
     pending: async (account) => {
-      for (const node of nodes) {
-        try {
-          const url = new URL("/api/mempool", node);
+      try {
+        return await chainNodes().read(chain, async (node) => {
+          const url = new URL("/api/mempool", node.url);
           url.searchParams.set("chainPath", chain.join("/"));
           const response = await fetch(url, { cache: "no-store" });
-          if (!response.ok) continue;
+          if (!response.ok) throw new Error(`mempool: HTTP ${response.status}`);
           const { transactions = [] } = await response.json();
+          const { volumes } = on(node.url);
           // A few at a time: a full mempool must not flood the reader.
           const bodies = [];
           let next = 0;
@@ -144,9 +150,10 @@ export function createFollows(options) {
             }),
           );
           return records.pendingIn(bodies, account);
-        } catch {}
+        });
+      } catch {
+        return {};
       }
-      return {};
     },
 
     /**

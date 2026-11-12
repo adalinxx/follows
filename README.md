@@ -166,7 +166,9 @@ Card text is shown as text with every `@` dropped, so only a verified handle
 shows with one. It closes on Escape or a press outside, and focus goes back
 to the name. Style it with the button's properties and `--follows-surface`.
 
-Reads go to the first node that answers. Every trie node is checked against
+Reads go to the nodes that serve the chain, found from `nodes` by the SDK's
+`ChainNodes`: those of `nodes` that serve it, else the hosts the chain's
+directory declares. Every trie node is checked against
 its CID, so a read doesn't depend on trusting the node that served it.
 Handles are resolved from one Moniker state, all at once. Writes go to the
 person's wallet, which shows each one and signs it. The library never holds
@@ -189,7 +191,9 @@ returns them.
   `state.mjs` reads state by walking down the trie, and `wallet.mjs` builds
   the wallet request. `state.mjs` and `wallet.mjs` are copied from
   moniker-sdk.
-- `vendor/lattice-sdk.js`: the Lattice SDK, bundled for browsers.
+- `vendor/lattice-sdk.js`: the Lattice SDK, bundled for browsers (from
+  0xLattice/lattice-sdk@382bf8c: `packages/sdk/dist/index.js` through
+  `esbuild@0.24.0 --bundle --format=esm --platform=browser --minify`).
 
 ## Test
 
